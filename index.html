@@ -501,7 +501,10 @@ let sensorSource = "history";      // "history" (accumulated store) | "live" (AP
 
 // All sensor metrics the device reports, with display config.
 const cToF = (c)=> c==null ? null : c*9/5+32;
-const SENSOR_FIELDS = ["temperature","humidity","barometricPressure","aqi","soundPressureLevel","eco2","voc"];
+const SENSOR_FIELDS = [
+  "temperature","humidity","barometricPressure","aqi","soundPressureLevel","eco2","voc",
+  "clear","nir","f1","f2","f3","f4","f5","f6","f7","f8"
+];
 const METRICS = [
   { key:"temperature",        label:"Temperature", unit:"°F",  color:"#ff9f1c", fx:cToF,    dp:0 },
   { key:"humidity",           label:"Humidity",    unit:"%",   color:"#00bbf9", fx:(v)=>v,  dp:0 },
@@ -510,6 +513,18 @@ const METRICS = [
   { key:"aqi",                label:"Air quality", unit:"AQI", color:"#f15bb5", fx:(v)=>v,  dp:0 },
   { key:"eco2",               label:"eCO₂",        unit:"ppm", color:"#ffd166", fx:(v)=>v,  dp:0 },
   { key:"voc",                label:"VOC",         unit:"idx", color:"#90be6d", fx:(v)=>v,  dp:2 },
+];
+const LIGHT_FIELDS = [
+  { key:"clear", label:"Clear", color:"#f9c74f" },
+  { key:"nir",   label:"NIR",   color:"#f94144" },
+  { key:"f1",    label:"F1",    color:"#43aa8b" },
+  { key:"f2",    label:"F2",    color:"#577590" },
+  { key:"f3",    label:"F3",    color:"#90be6d" },
+  { key:"f4",    label:"F4",    color:"#f3722c" },
+  { key:"f5",    label:"F5",    color:"#277da1" },
+  { key:"f6",    label:"F6",    color:"#9b5de5" },
+  { key:"f7",    label:"F7",    color:"#4cc9f0" },
+  { key:"f8",    label:"F8",    color:"#ffd166" },
 ];
 
 function loadStore(){
@@ -552,12 +567,13 @@ function mergeSensorNodes(nodes){
 function storeNodes(){
   return Object.keys(sensorStore).sort().map(ts=> Object.assign({ timestamp: ts }, sensorStore[ts]));
 }
+function byTsAsc(a,b){ return a.timestamp<b.timestamp ? -1 : 1; }
 // The node set the widgets/charts draw from, honoring the source toggle.
 function currentSensorNodes(){
   if(sensorSource === "live"){
     const s = charts._station && charts._station.sensors;
     const nodes = s && s.environmentHistory && s.environmentHistory.nodes ? s.environmentHistory.nodes : [];
-    return nodes.slice().sort((a,b)=> a.timestamp<b.timestamp ? -1 : 1);
+    return nodes.slice().sort(byTsAsc);
   }
   return storeNodes();
 }
@@ -566,6 +582,21 @@ function currentSensorNodes(){
 let wxRangeHours = 24;
 function rangedSensorNodes(){
   const nodes = currentSensorNodes();
+  if(!wxRangeHours || nodes.length<2) return nodes;
+  const last = new Date(nodes[nodes.length-1].timestamp).getTime();
+  const cutoff = last - wxRangeHours*36e5;
+  return nodes.filter(n=> new Date(n.timestamp).getTime() >= cutoff);
+}
+function currentLightNodes(){
+  if(sensorSource === "live"){
+    const s = charts._station && charts._station.sensors;
+    const nodes = s && s.lightHistory && s.lightHistory.nodes ? s.lightHistory.nodes : [];
+    return nodes.slice().sort(byTsAsc);
+  }
+  return storeNodes().filter(n=> LIGHT_FIELDS.some(f=> n[f.key]!=null));
+}
+function rangedLightNodes(){
+  const nodes = currentLightNodes();
   if(!wxRangeHours || nodes.length<2) return nodes;
   const last = new Date(nodes[nodes.length-1].timestamp).getTime();
   const cutoff = last - wxRangeHours*36e5;
@@ -694,6 +725,8 @@ const Q_STATION = `query($id:ID!){
     sensors {
       environment { temperature humidity barometricPressure aqi soundPressureLevel eco2 voc }
       environmentHistory(last:1000){ nodes { timestamp temperature humidity barometricPressure aqi soundPressureLevel eco2 voc } }
+      light { timestamp clear nir f1 f2 f3 f4 f5 f6 f7 f8 }
+      lightHistory(last:1000){ nodes { timestamp clear nir f1 f2 f3 f4 f5 f6 f7 f8 } }
     }
   }
 }`;
@@ -1354,7 +1387,10 @@ function renderWeatherCharts(){
     grid.innerHTML = METRICS.map(m=>
       '<div class="card span2"><h2>'+m.label+' <small style="color:var(--muted);font-weight:600">'+m.unit+'</small></h2>'+
       '<div class="chartbox tall"><canvas id="wx_'+m.key+'"></canvas></div></div>'
-    ).join("");
+    ).join("")+
+    '<div class="card span2"><h2>Light Sensor Spectrum <small style="color:var(--muted);font-weight:600">raw channel counts</small></h2>'+
+    '<p class="hint" id="lightHint">Multi-band optical channels (clear, NIR, F1-F8). This is a multi-channel light sensor, not a full spectrometer.</p>'+
+    '<div class="chartbox tall"><canvas id="cLight"></canvas></div></div>';
     grid.dataset.built = "1";
   }
   const multiDay = nodes.length>1 && (new Date(nodes[nodes.length-1].timestamp)-new Date(nodes[0].timestamp))>36e5*24;
@@ -1377,6 +1413,34 @@ function renderWeatherCharts(){
       }
     });
   }
+
+  const lightNodes = rangedLightNodes();
+  const multiDayL = lightNodes.length>1 && (new Date(lightNodes[lightNodes.length-1].timestamp)-new Date(lightNodes[0].timestamp))>36e5*24;
+  const labelsL = lightNodes.map(n=> new Date(n.timestamp).toLocaleString(undefined,
+    multiDayL ? {month:"numeric",day:"numeric",hour:"numeric"} : {hour:"numeric",minute:"2-digit"}));
+  const ds = LIGHT_FIELDS.map(f=>(
+    { label:f.label, data:lightNodes.map(n=> n[f.key]!=null ? n[f.key] : null), borderColor:f.color, borderWidth:1.6, pointRadius:0, tension:.25, fill:false, spanGaps:true }
+  ));
+  const lh = $("lightHint");
+  if(lh){
+    lh.textContent = lightNodes.length
+      ? "Multi-band optical channels (clear, NIR, F1-F8) over the selected range. This is a multi-channel light sensor, not a full spectrometer."
+      : "No light sensor readings in the selected range/source.";
+  }
+  destroy("cLight");
+  charts.cLight = new Chart($("cLight"), {
+    type:"line",
+    data:{ labels: labelsL, datasets: ds },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      interaction:{ mode:"index", intersect:false },
+      plugins:{ legend:{ position:"top", labels:{ boxWidth:10, padding:8, font:{size:10} } } },
+      scales:{
+        x:{ grid:{display:false}, ticks:{ maxTicksLimit:8, maxRotation:0 } },
+        y:{ grid:GRID, title:{display:true,text:"sensor counts",color:"#8b98a9",font:{size:10}} }
+      }
+    }
+  });
 }
 
 // Mean onboard temperature/humidity by hour-of-day (station local).
@@ -1552,6 +1616,9 @@ async function load(){
     // Accumulate this load's sensor readings into the persistent store.
     if(charts._station && charts._station.sensors && charts._station.sensors.environmentHistory){
       mergeSensorNodes(charts._station.sensors.environmentHistory.nodes);
+      if(charts._station.sensors.lightHistory && charts._station.sensors.lightHistory.nodes){
+        mergeSensorNodes(charts._station.sensors.lightHistory.nodes);
+      }
       saveStore();
       updateStoreInfo();
     }
