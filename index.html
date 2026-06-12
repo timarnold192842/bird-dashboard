@@ -108,9 +108,23 @@
   .feed .info{min-width:0;flex:1}
   .feed .info .nm{font-weight:600;font-size:13.5px}
   .feed .info .mt{color:var(--muted);font-size:11.5px;margin-top:1px}
+  .feed .info .am{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:3px}
+  .feed .info .am .loud{font-size:11px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);color:var(--muted)}
+  .feed .info .am .loud.vq{color:#ffd166;border-color:#745a1c}
+  .feed .info .am .loud.silent{color:#ef476f;border-color:#6d2233}
+  .feed .info .am .openbw{font-size:11px;color:var(--muted)}
+  .feed .info .am .openbw:hover{color:var(--accent)}
   .feed .conf{font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted);text-align:right;min-width:54px}
   .feed audio{height:34px;flex:none;max-width:200px}
   @media (max-width:560px){ .feed audio{max-width:130px} }
+
+  .feedtools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 10px}
+  .feedtools .lbl{color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.5px}
+  .feedtools .aseg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .feedtools .aseg button{background:var(--panel2);color:var(--muted);border:0;padding:4px 10px;font-size:12px;cursor:pointer}
+  .feedtools .aseg button.active{background:var(--accent);color:#04121c;font-weight:700}
+  .feedtools .tog{display:inline-flex;gap:6px;align-items:center;color:var(--muted);font-size:12px}
+  .feedtools .tog input{accent-color:var(--accent)}
 
   /* sensor history store toolbar */
   .storebar{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
@@ -322,6 +336,15 @@
     <div class="card span2">
       <h2>Recent detections</h2>
       <p class="hint">The latest identifications with playable audio — listen to verify the calls yourself.</p>
+      <div class="feedtools" id="feedTools">
+        <span class="lbl">Playback</span>
+        <div class="aseg" id="boostSeg">
+          <button data-g="1">1x</button>
+          <button data-g="2" class="active">2x</button>
+          <button data-g="4">4x</button>
+        </div>
+        <label class="tog"><input type="checkbox" id="autoLevel"> Auto-level</label>
+      </div>
       <ul class="feed" id="feed"><li><span class="info">Loading…</span></li></ul>
     </div>
 
@@ -409,6 +432,13 @@ const PERIODS = {
 let currentPeriod = "7d";
 const charts = {};                 // canvasId -> Chart instance
 let speciesMeta = {};              // speciesId -> { name, sci, color, thumb, bw, ebird, wiki, total }
+const loudnessCache = new Map();   // audio URL -> { cls, label }
+const audioFx = {                  // shared playback settings for all feed clips
+  boost: 2,
+  auto: false,
+  ctx: null,
+  nodes: new WeakMap()             // HTMLAudioElement -> { gain, comp }
+};
 
 /* ------------------------------------------------------------------ */
 /* Sensor history store (persisted + exportable/importable)            */
@@ -1028,6 +1058,98 @@ function spLinks(m){
   return a.length ? '<span class="lnks">'+a.join(" ")+'</span>' : "";
 }
 
+function ensureAudioContext(){
+  if(audioFx.ctx) return audioFx.ctx;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if(!Ctx) return null;
+  audioFx.ctx = new Ctx();
+  return audioFx.ctx;
+}
+
+function applyAudioNodeSettings(node){
+  if(!node) return;
+  node.gain.gain.value = audioFx.boost;
+  if(audioFx.auto){
+    node.comp.threshold.value = -28;
+    node.comp.knee.value = 20;
+    node.comp.ratio.value = 4;
+    node.comp.attack.value = 0.003;
+    node.comp.release.value = 0.25;
+  }else{
+    node.comp.threshold.value = 0;
+    node.comp.knee.value = 0;
+    node.comp.ratio.value = 1;
+    node.comp.attack.value = 0.003;
+    node.comp.release.value = 0.05;
+  }
+}
+
+function hookAudioFx(audio){
+  if(!audio) return;
+  let node = audioFx.nodes.get(audio);
+  if(node){ applyAudioNodeSettings(node); return; }
+  const ctx = ensureAudioContext();
+  if(!ctx) return;
+  try{
+    const src = ctx.createMediaElementSource(audio);
+    const comp = ctx.createDynamicsCompressor();
+    const gain = ctx.createGain();
+    src.connect(comp); comp.connect(gain); gain.connect(ctx.destination);
+    node = { src, comp, gain };
+    audioFx.nodes.set(audio, node);
+    applyAudioNodeSettings(node);
+  }catch(e){
+    // MediaElementSource can only be created once per element; ignore if failed.
+  }
+}
+
+function classifyLoudness(db){
+  if(!isFinite(db)) return { cls:"silent", label:"silent" };
+  if(db < -38) return { cls:"silent", label:"near-silent" };
+  if(db < -31) return { cls:"vq", label:"very quiet" };
+  if(db < -25) return { cls:"", label:"quiet" };
+  return { cls:"", label:"audible" };
+}
+
+async function loudnessFor(url){
+  if(loudnessCache.has(url)) return loudnessCache.get(url);
+  try{
+    const r = await fetch(url, { mode:"cors" });
+    if(!r.ok) throw new Error("audio fetch "+r.status);
+    const ab = await r.arrayBuffer();
+    const ctx = ensureAudioContext();
+    if(!ctx) throw new Error("no audio context");
+    const buf = await ctx.decodeAudioData(ab.slice(0));
+    let sum = 0, n = 0;
+    const step = 32;
+    for(let c=0;c<buf.numberOfChannels;c++){
+      const ch = buf.getChannelData(c);
+      for(let i=0;i<ch.length;i+=step){ const v = ch[i]; sum += v*v; n++; }
+    }
+    const rms = Math.sqrt(sum/Math.max(1,n));
+    const db = 20*Math.log10(Math.max(1e-8, rms));
+    const out = classifyLoudness(db);
+    loudnessCache.set(url, out);
+    return out;
+  }catch(_e){
+    const out = { cls:"", label:"unknown" };
+    loudnessCache.set(url, out);
+    return out;
+  }
+}
+
+async function refreshLoudnessBadges(){
+  const badges = document.querySelectorAll("#feed [data-audbadge]");
+  for(const b of badges){
+    const url = b.getAttribute("data-audbadge");
+    if(!url) continue;
+    const lv = await loudnessFor(url);
+    b.classList.remove("skel","vq","silent");
+    if(lv.cls) b.classList.add(lv.cls);
+    b.textContent = lv.label;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* New visualizations                                                  */
 /* ------------------------------------------------------------------ */
@@ -1172,15 +1294,24 @@ function renderFeed(sample, images){
     const t = new Date(d.timestamp);
     const when = t.toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
     const audio = d.soundscape && d.soundscape.url
-      ? '<audio controls preload="none" src="'+d.soundscape.url+'"></audio>' : '';
+      ? '<audio controls preload="none" crossorigin="anonymous" src="'+d.soundscape.url+'"></audio>' : '';
     const nm = m.bw ? '<a href="'+m.bw+'" target="_blank" rel="noopener">'+(d.species?.commonName||"Unknown")+'</a>' : (d.species?.commonName||"Unknown");
+    const openBw = m.bw ? '<a class="openbw" href="'+m.bw+'" target="_blank" rel="noopener">Open on BirdWeather</a>' : '';
+    const loud = d.soundscape && d.soundscape.url
+      ? '<span class="loud skel" data-audbadge="'+d.soundscape.url+'">analyzing…</span>'
+      : '<span class="loud">no audio</span>';
     return '<li>'+thumb+
       '<div class="info"><div class="nm">'+nm+'</div>'+
-      '<div class="mt">'+when+' · '+timeAgo(d.timestamp)+'</div>'+spLinks(m)+'</div>'+
+      '<div class="mt">'+when+' · '+timeAgo(d.timestamp)+'</div>'+spLinks(m)+
+      '<div class="am">'+loud+openBw+'</div></div>'+
       audio+
       '<div class="conf">'+(d.confidence!=null?(d.confidence*100).toFixed(0)+"%":"")+'</div>'+
     '</li>';
   }).join("");
+
+  // Apply shared playback FX and loudness labels after the rows are in DOM.
+  el.querySelectorAll("audio").forEach(hookAudioFx);
+  refreshLoudnessBadges();
 }
 
 // #7 Environment — a small dashboard widget (current value + sparkline) per sensor
@@ -1459,6 +1590,18 @@ $("periodSeg").addEventListener("click",(e)=>{
   load();
 });
 $("refreshBtn").addEventListener("click", load);
+
+$("boostSeg").addEventListener("click", (e)=>{
+  const b = e.target.closest("button[data-g]"); if(!b) return;
+  [...$("boostSeg").children].forEach(x=>x.classList.toggle("active", x===b));
+  audioFx.boost = +b.dataset.g;
+  document.querySelectorAll("#feed audio").forEach(hookAudioFx);
+});
+
+$("autoLevel").addEventListener("change", (e)=>{
+  audioFx.auto = !!e.target.checked;
+  document.querySelectorAll("#feed audio").forEach(hookAudioFx);
+});
 
 $("btnExport").addEventListener("click", exportHistory);
 $("btnImport").addEventListener("click", ()=> $("fileImport").click());
