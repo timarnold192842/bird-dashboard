@@ -221,16 +221,17 @@
 
   /* bird detections timeline */
   .timelinebox{overflow-x:auto;overflow-y:hidden;padding-bottom:4px}
-  .timelineinner{position:relative;height:240px;min-width:1400px;background:linear-gradient(180deg,#141b27 0,#121925 100%);border:1px solid var(--line);border-radius:12px}
+  .timelineinner{position:relative;height:252px;min-width:1200px;background:linear-gradient(180deg,#141b27 0,#121925 100%);border:1px solid var(--line);border-radius:12px}
   .tl-base{position:absolute;left:26px;right:26px;bottom:30px;height:2px;background:#2a3342}
   .tl-tick{position:absolute;bottom:24px;width:1px;height:12px;background:#2f3b4e}
-  .tl-ticklbl{position:absolute;bottom:4px;transform:translateX(-50%);font-size:11px;color:var(--muted);white-space:nowrap}
+  .tl-ticklbl{position:absolute;bottom:2px;transform:translateX(-50%);font-size:10px;color:var(--muted);white-space:nowrap;opacity:.95;max-width:95px;overflow:hidden;text-overflow:ellipsis}
+  .tl-ticklbl.alt{bottom:14px;opacity:.8}
   .tl-col{position:absolute;bottom:31px;transform:translateX(-50%);width:0;height:176px}
   .tl-col .line{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:2px;background:rgba(179,136,235,.55);border-radius:2px}
   .tl-col .dot{position:absolute;left:50%;transform:translateX(-50%);border-radius:999px;overflow:hidden;border:2px solid #1a2332;box-shadow:0 3px 10px rgba(0,0,0,.35);background:#253144}
   .tl-col .dot img{width:100%;height:100%;object-fit:cover;display:block}
-  .tl-col .dot .ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:11px;color:#d9e2ef;font-weight:700}
-  .tl-col .cnt{position:absolute;left:50%;transform:translateX(-50%);bottom:-23px;font-size:10.5px;color:#c9d4e3;background:#1a2432;border:1px solid #2f3d52;padding:0 6px;border-radius:999px;line-height:17px;height:17px}
+  .tl-col .dot .ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:12px;color:#d9e2ef;font-weight:700}
+  .tl-col .cnt{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;font-size:10.5px;color:#c9d4e3;background:#1a2432;border:1px solid #2f3d52;padding:0 6px;border-radius:999px;line-height:17px;height:17px;pointer-events:none}
   .tl-gap{position:absolute;top:14px;bottom:38px;width:14px;transform:translateX(-50%);background:repeating-linear-gradient(135deg,rgba(255,255,255,.25),rgba(255,255,255,.25) 2px,transparent 2px,transparent 6px);opacity:.45;border-radius:3px}
   .tl-gaplbl{position:absolute;top:4px;left:50%;transform:translateX(-50%);font-size:10.5px;color:var(--muted);background:#151d2a;padding:1px 6px;border-radius:999px;border:1px solid #2d3a4d;white-space:nowrap}
   .tlhelp{color:var(--muted);font-size:12px;margin-top:8px}
@@ -1307,7 +1308,9 @@ function renderDetectionTimeline(detections, images){
   const effRange = Math.max(1, eff[eff.length-1]);
 
   const visible = Math.max(420, wrap.clientWidth || 900);
-  const innerW = Math.max(visible*8, Math.min(visible*20, 16000));
+  const pxPerMarker = Math.max(6, Math.min(14, 1600/Math.max(40, rows.length)));
+  const densityWidth = Math.ceil(rows.length * pxPerMarker) + 120;
+  const innerW = Math.max(visible*1.35, Math.min(visible*6, Math.max(densityWidth, 980)));
   const leftPad = 26, rightPad = 26, baseline = 210;
   const spanW = innerW - leftPad - rightPad;
   const xAt = (e)=> leftPad + (e/effRange)*spanW;
@@ -1316,13 +1319,14 @@ function renderDetectionTimeline(detections, images){
   let html = '<div class="timelineinner" style="width:'+innerW+'px">';
   html += '<div class="tl-base"></div>';
 
-  const tickN = 10;
+  const tickN = Math.max(5, Math.min(10, Math.floor(spanW/190)));
   for(let i=0;i<=tickN;i++){
     const idx = Math.round((rows.length-1) * (i/tickN));
     const x = xAt(eff[idx]);
     const t = new Date(rows[idx].t);
     const lbl = t.toLocaleString(undefined, currentPeriod==="24h" ? {hour:"numeric",minute:"2-digit"} : {month:"numeric",day:"numeric",hour:"numeric"});
-    html += '<div class="tl-tick" style="left:'+x+'px"></div><div class="tl-ticklbl" style="left:'+x+'px">'+lbl+'</div>';
+    const lblCls = i%2 ? 'tl-ticklbl alt' : 'tl-ticklbl';
+    html += '<div class="tl-tick" style="left:'+x+'px"></div><div class="'+lblCls+'" style="left:'+x+'px">'+lbl+'</div>';
   }
 
   for(const gp of gaps){
@@ -1332,22 +1336,27 @@ function renderDetectionTimeline(detections, images){
     html += '<div class="tl-gap" style="left:'+x+'px"></div><div class="tl-gaplbl" style="left:'+x+'px">'+lbl+'</div>';
   }
 
+  let lastBadgeX = -1e9;
+  const minBadgeDx = 34;
   for(let i=0;i<rows.length;i++){
     const r = rows[i];
     const x = xAt(eff[i]);
-    const mag = 22 + (Math.log1p(r.total)/Math.log1p(maxTotal))*130;
-    const sz = 18 + Math.min(18, Math.sqrt(r.top.c)*4);
+    const mag = 24 + (Math.log1p(r.total)/Math.log1p(maxTotal))*128;
+    const sz = 24 + Math.min(20, Math.sqrt(r.top.c)*4);
     const m = speciesMeta[r.top.id] || {};
     const img = (images && images[r.top.id] && images[r.top.id].thumbnailUrl) || m.thumb || "";
     const bw = m.bw || "";
-    const title = r.top.name+' · '+new Date(r.t).toLocaleString()+' · '+r.total+' detections';
+    const sci = m.sci || "";
+    const title = r.top.name + (sci ? ' ('+sci+')' : '')+' · '+new Date(r.t).toLocaleString()+' · '+r.total+' detections';
     const dotBottom = Math.max(8, mag - sz*0.45);
+    const showCnt = r.total>1 && (x-lastBadgeX)>=minBadgeDx;
+    if(showCnt) lastBadgeX = x;
     html += '<div class="tl-col" style="left:'+x+'px" title="'+title.replace(/"/g,'&quot;')+'">'+
       '<span class="line" style="height:'+mag+'px"></span>'+
       (bw ? '<a class="dot" href="'+bw+'" target="_blank" rel="noopener" style="bottom:'+dotBottom+'px;width:'+sz+'px;height:'+sz+'px">' : '<span class="dot" style="bottom:'+dotBottom+'px;width:'+sz+'px;height:'+sz+'px">')+
       (img ? '<img src="'+img+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '<span class="ph">'+(r.top.name||"?").slice(0,1)+'</span>')+
       (bw ? '</a>' : '</span>')+
-      (r.total>1 ? '<span class="cnt">x'+r.total+'</span>' : '')+
+      (showCnt ? '<span class="cnt">x'+r.total+'</span>' : '')+
     '</div>';
   }
   html += '</div>';
