@@ -67,6 +67,8 @@
   .bar{position:relative;height:8px;border-radius:4px;background:var(--panel2);overflow:hidden;min-width:80px}
   .bar > span{position:absolute;inset:0 auto 0 0;border-radius:4px}
   .pct{color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px;width:46px;display:inline-block;text-align:right}
+  .samplecell audio{height:28px;max-width:170px}
+  .samplecell .nosample{color:var(--muted);font-size:11.5px}
 
   .status{padding:40px;text-align:center;color:var(--muted)}
   .status.err{color:var(--bad)}
@@ -342,6 +344,8 @@
           <button data-g="1">1x</button>
           <button data-g="2" class="active">2x</button>
           <button data-g="4">4x</button>
+          <button data-g="8">8x</button>
+          <button data-g="12">12x</button>
         </div>
         <label class="tog"><input type="checkbox" id="autoLevel"> Auto-level</label>
       </div>
@@ -354,10 +358,10 @@
       <div class="tablewrap">
         <table>
           <thead>
-            <tr><th class="rank">#</th><th>Species</th><th class="num">Detections</th><th class="num">Share</th><th>Last seen</th><th style="width:160px">Relative</th></tr>
+            <tr><th class="rank">#</th><th>Species</th><th class="num">Detections</th><th class="num">Share</th><th>Last seen</th><th style="width:160px">Relative</th><th>Sample</th></tr>
           </thead>
           <tbody id="sppTbody">
-            <tr><td colspan="6" class="status">Loading…</td></tr>
+            <tr><td colspan="7" class="status">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -730,7 +734,7 @@ function renderMap(s){
   const co = $("locCoords"); if(co) co.textContent = s.coords.lat.toFixed(4)+", "+s.coords.lon.toFixed(4);
   if(el.dataset.built === "1") return;
   const lat = s.coords.lat, lon = s.coords.lon;
-  const z = 12, W = 240, H = 130, T = 256, n = Math.pow(2,z);
+  const z = 18, W = 240, H = 130, T = 256, n = Math.pow(2,z);
   const xf = (lon+180)/360*n;
   const latRad = lat*Math.PI/180;
   const yf = (1 - Math.log(Math.tan(latRad)+1/Math.cos(latRad))/Math.PI)/2*n;
@@ -998,10 +1002,10 @@ function renderFreq(A){
   });
 }
 
-function renderTable(A, images){
+function renderTable(A, images, samplesBySpecies={}){
   const tb = $("sppTbody");
   $("tblHint").textContent = A.ranked.length+" species detected — ranked by count ("+PERIODS[currentPeriod].label+").";
-  if(!A.ranked.length){ tb.innerHTML='<tr><td colspan="6" class="status">No detections in this range.</td></tr>'; return; }
+  if(!A.ranked.length){ tb.innerHTML='<tr><td colspan="7" class="status">No detections in this range.</td></tr>'; return; }
   const max = A.ranked[0].total;
   tb.innerHTML = A.ranked.map((s,i)=>{
     const img = images[s.id];
@@ -1015,6 +1019,10 @@ function renderTable(A, images){
     const lastIso = (img && img.latestDetectionAt) || null;
     const seen = timeAgo(lastIso);
     const seenTitle = lastIso ? new Date(lastIso).toLocaleString() : "";
+    const smp = samplesBySpecies[String(s.id)] || null;
+    const sampleHtml = smp && smp.soundscape && smp.soundscape.url
+      ? '<audio controls preload="none" crossorigin="anonymous" src="'+smp.soundscape.url+'"></audio>'
+      : '<span class="nosample">—</span>';
     return '<tr>'+
       '<td class="rank">'+(i+1)+'</td>'+
       '<td><div class="sp">'+thumb+'<div class="nm"><span>'+s.name+'</span>'+sci+spLinks(s)+'</div></div></td>'+
@@ -1022,8 +1030,12 @@ function renderTable(A, images){
       '<td class="num"><span class="pct">'+pct(share)+'</span></td>'+
       '<td style="color:var(--muted)" title="'+seenTitle+'">'+seen+'</td>'+
       '<td><div class="bar"><span style="width:'+(s.total/max*100)+'%;background:'+(s.color||"#4cc9f0")+'"></span></div></td>'+
+      '<td class="samplecell">'+sampleHtml+'</td>'+
     '</tr>';
   }).join("");
+
+  // Apply the same playback boost/auto-level to per-species table samples.
+  tb.querySelectorAll("audio").forEach(hookAudioFx);
 }
 
 /* shared chart options */
@@ -1148,6 +1160,10 @@ async function refreshLoudnessBadges(){
     if(lv.cls) b.classList.add(lv.cls);
     b.textContent = lv.label;
   }
+}
+
+function applyAudioFxToAll(){
+  document.querySelectorAll("audio").forEach(hookAudioFx);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1310,7 +1326,7 @@ function renderFeed(sample, images){
   }).join("");
 
   // Apply shared playback FX and loudness labels after the rows are in DOM.
-  el.querySelectorAll("audio").forEach(hookAudioFx);
+  applyAudioFxToAll();
   refreshLoudnessBadges();
 }
 
@@ -1516,6 +1532,20 @@ async function fetchDetectionSample(dur, max=600){
   return nodes.slice(0,max);
 }
 
+// Pick one representative sample clip per species (highest confidence with audio).
+function indexSpeciesSamples(sample){
+  const out = {};
+  for(const d of (sample||[])){
+    if(!d || !d.speciesId || !d.soundscape || !d.soundscape.url) continue;
+    const id = String(d.speciesId);
+    const cur = out[id];
+    const conf = d.confidence==null ? -1 : d.confidence;
+    const curConf = cur && cur.confidence!=null ? cur.confidence : -1;
+    if(!cur || conf > curConf) out[id] = d;
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ */
 /* Load                                                                */
 /* ------------------------------------------------------------------ */
@@ -1543,6 +1573,7 @@ async function load(){
     }
 
     const A = aggregate(series.daily||[], series.hours||[]);
+    const samplesBySpecies = indexSpeciesSamples(sample);
     charts._lastA = A;
     speciesMeta = A.meta || {};
     renderKPIs(A);
@@ -1554,7 +1585,7 @@ async function load(){
     renderSppTime(A);
     renderDough(A);
     renderFreq(A);
-    renderTable(A, imageCache||{});
+    renderTable(A, imageCache||{}, samplesBySpecies);
 
     // new visualizations
     renderHeatmap(A);
@@ -1595,12 +1626,12 @@ $("boostSeg").addEventListener("click", (e)=>{
   const b = e.target.closest("button[data-g]"); if(!b) return;
   [...$("boostSeg").children].forEach(x=>x.classList.toggle("active", x===b));
   audioFx.boost = +b.dataset.g;
-  document.querySelectorAll("#feed audio").forEach(hookAudioFx);
+  applyAudioFxToAll();
 });
 
 $("autoLevel").addEventListener("change", (e)=>{
   audioFx.auto = !!e.target.checked;
-  document.querySelectorAll("#feed audio").forEach(hookAudioFx);
+  applyAudioFxToAll();
 });
 
 $("btnExport").addEventListener("click", exportHistory);
