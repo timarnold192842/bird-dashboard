@@ -602,6 +602,65 @@ function rangedLightNodes(){
   const cutoff = last - wxRangeHours*36e5;
   return nodes.filter(n=> new Date(n.timestamp).getTime() >= cutoff);
 }
+
+// Build one shared, continuous x-axis for all Weather plots so every chart
+// aligns perfectly even when individual series have gaps.
+function chooseWeatherStepMs(nodes){
+  if(!nodes || nodes.length<2) return 5*60*1000;
+  const diffs = [];
+  let prev = +new Date(nodes[0].timestamp);
+  for(let i=1;i<nodes.length;i++){
+    const t = +new Date(nodes[i].timestamp);
+    const d = t - prev;
+    if(d>0) diffs.push(d);
+    prev = t;
+  }
+  if(!diffs.length) return 5*60*1000;
+  diffs.sort((a,b)=>a-b);
+  const med = diffs[Math.floor(diffs.length/2)];
+  const candidates = [60e3, 2*60e3, 5*60e3, 10*60e3, 15*60e3, 30*60e3, 60*60e3];
+  let best = candidates[0], bestErr = Infinity;
+  for(const c of candidates){
+    const err = Math.abs(c-med);
+    if(err < bestErr){ bestErr = err; best = c; }
+  }
+  return best;
+}
+
+function weatherAxis(){
+  const env = currentSensorNodes();
+  const lig = currentLightNodes();
+  const all = env.concat(lig).sort(byTsAsc);
+  if(!all.length) return { labels:[], times:[], start:0, end:0, stepMs:5*60*1000 };
+
+  const latest = +new Date(all[all.length-1].timestamp);
+  const earliest = +new Date(all[0].timestamp);
+  const startRaw = wxRangeHours ? latest - wxRangeHours*36e5 : earliest;
+  const inRange = all.filter(n=>{ const t=+new Date(n.timestamp); return t>=startRaw && t<=latest; });
+  const stepMs = chooseWeatherStepMs(inRange.length?inRange:all);
+  const start = Math.floor(startRaw/stepMs)*stepMs;
+  const end = Math.ceil(latest/stepMs)*stepMs;
+
+  const times = [];
+  for(let t=start;t<=end;t+=stepMs) times.push(t);
+  const multiDay = end-start > 36e5*24;
+  const labels = times.map(t=> new Date(t).toLocaleString(undefined,
+    multiDay ? {month:"numeric",day:"numeric",hour:"numeric"} : {hour:"numeric",minute:"2-digit"}
+  ));
+  return { labels, times, start, end, stepMs };
+}
+
+function seriesOnAxis(nodes, axis, pick){
+  const m = new Map();
+  for(const n of (nodes||[])){
+    const t = +new Date(n.timestamp);
+    if(t < axis.start || t > axis.end) continue;
+    const b = Math.round(t/axis.stepMs)*axis.stepMs;
+    const v = pick(n);
+    if(v!=null) m.set(b, v);
+  }
+  return axis.times.map(t=> m.has(t) ? m.get(t) : null);
+}
 function storeSpanLabel(){
   const keys = Object.keys(sensorStore);
   if(!keys.length) return "no stored sensor readings yet";
@@ -1382,6 +1441,7 @@ function renderEnv(station){
 // Full-size per-sensor charts for the Weather tab, over the selected range.
 function renderWeatherCharts(){
   const grid = $("wxGrid"); if(!grid) return;
+  const axis = weatherAxis();
   const nodes = rangedSensorNodes();
   if(grid.dataset.built !== "1"){
     grid.innerHTML = METRICS.map(m=>
@@ -1393,11 +1453,9 @@ function renderWeatherCharts(){
     '<div class="chartbox tall"><canvas id="cLight"></canvas></div></div>';
     grid.dataset.built = "1";
   }
-  const multiDay = nodes.length>1 && (new Date(nodes[nodes.length-1].timestamp)-new Date(nodes[0].timestamp))>36e5*24;
-  const labels = nodes.map(n=> new Date(n.timestamp).toLocaleString(undefined,
-    multiDay ? {month:"numeric",day:"numeric",hour:"numeric"} : {hour:"numeric",minute:"2-digit"}));
+  const labels = axis.labels;
   for(const m of METRICS){
-    const data = nodes.map(n=> n[m.key]!=null ? m.fx(n[m.key]) : null);
+    const data = seriesOnAxis(nodes, axis, (n)=> n[m.key]!=null ? m.fx(n[m.key]) : null);
     destroy("wx_"+m.key);
     charts["wx_"+m.key] = new Chart($("wx_"+m.key), {
       type:"line",
@@ -1415,11 +1473,9 @@ function renderWeatherCharts(){
   }
 
   const lightNodes = rangedLightNodes();
-  const multiDayL = lightNodes.length>1 && (new Date(lightNodes[lightNodes.length-1].timestamp)-new Date(lightNodes[0].timestamp))>36e5*24;
-  const labelsL = lightNodes.map(n=> new Date(n.timestamp).toLocaleString(undefined,
-    multiDayL ? {month:"numeric",day:"numeric",hour:"numeric"} : {hour:"numeric",minute:"2-digit"}));
+  const labelsL = axis.labels;
   const ds = LIGHT_FIELDS.map(f=>(
-    { label:f.label, data:lightNodes.map(n=> n[f.key]!=null ? n[f.key] : null), borderColor:f.color, borderWidth:1.6, pointRadius:0, tension:.25, fill:false, spanGaps:true }
+    { label:f.label, data:seriesOnAxis(lightNodes, axis, (n)=> n[f.key]!=null ? n[f.key] : null), borderColor:f.color, borderWidth:1.6, pointRadius:0, tension:.25, fill:false, spanGaps:true }
   ));
   const lh = $("lightHint");
   if(lh){
