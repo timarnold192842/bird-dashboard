@@ -138,6 +138,44 @@
   .tabs button.active{background:var(--accent);color:#06222c}
   .view[hidden]{display:none}
 
+  /* per-species external links */
+  .lnks{display:block;margin-top:2px}
+  .lnks a{font-size:11px;color:var(--muted);margin-right:8px}
+  .lnks a:hover{color:var(--accent)}
+
+  /* shared station location card */
+  .locbar{display:flex;align-items:center;gap:16px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow);margin:14px 0 4px}
+  .maptile{position:relative;width:240px;height:130px;border-radius:10px;overflow:hidden;flex:none;background:var(--panel2);border:1px solid var(--line)}
+  .maptile a.tilelink{position:absolute;inset:0;display:block;z-index:3}
+  .maptile .pin{position:absolute;left:50%;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:var(--accent);border:2px solid #04121c;box-shadow:0 0 0 4px rgba(76,201,240,.3);z-index:2;pointer-events:none}
+  .maptile .attr{position:absolute;right:2px;bottom:1px;font-size:8.5px;color:#000a;background:#ffffffb0;padding:0 3px;border-radius:3px;z-index:2}
+  .maptile .attr a{color:#06c}
+  .locmeta{min-width:0}
+  .locmeta .nm{font-weight:600;font-size:15px}
+  .locmeta .co{color:var(--muted);font-size:12.5px;margin-top:3px}
+  @media (max-width:560px){ .maptile{width:150px;height:110px} }
+
+  /* feature row: top species + latest arrivals */
+  .feature{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:18px 0 22px}
+  .toplist{display:flex;flex-direction:column;gap:9px}
+  .toprow{display:flex;align-items:center;gap:12px}
+  .toprow .r{color:var(--muted);font-weight:700;width:16px;text-align:center;font-variant-numeric:tabular-nums;flex:none}
+  .toprow img,.toprow .ph{width:44px;height:44px;border-radius:10px;object-fit:cover;background:var(--panel2);flex:none}
+  .toprow .m{flex:1;min-width:0}
+  .toprow .m .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .toprow .big{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;flex:none;line-height:1.1}
+  .toprow .big small{display:block;font-size:11px;font-weight:600;color:var(--muted)}
+  .toprow.lead img,.toprow.lead .ph{width:58px;height:58px}
+  .toprow.lead .m .nm{font-size:17px}
+  .toprow.lead .big{font-size:28px}
+  .arrgrid{display:flex;flex-wrap:wrap;gap:10px}
+  .arr{display:flex;align-items:center;gap:9px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:7px 12px 7px 7px}
+  .arr img,.arr .ph{width:38px;height:38px;border-radius:9px;object-fit:cover;flex:none;background:var(--panel)}
+  .arr .nm{font-weight:600;font-size:13px}
+  .timeline .names .n{display:inline-flex;align-items:center}
+  .timeline .names .n .ti{width:18px;height:18px;border-radius:4px;object-fit:cover;margin-right:5px}
+  @media (max-width:880px){ .feature{grid-template-columns:1fr} }
+
   @media (max-width:880px){ .grid{grid-template-columns:1fr} }
 </style>
 </head>
@@ -156,6 +194,15 @@
     <button data-v="weather">🌡️ Weather</button>
   </nav>
 
+  <div class="locbar">
+    <div class="maptile" id="mapTile"></div>
+    <div class="locmeta">
+      <div class="nm" id="locName">Station 27598</div>
+      <div class="co">📍 <span id="locCoords">—</span></div>
+      <div class="co"><a id="locLink" href="https://app.birdweather.com/stations/27598" target="_blank" rel="noopener">View station on BirdWeather ↗</a></div>
+    </div>
+  </div>
+
   <div id="errBox"></div>
 
   <section id="viewBirds" class="view">
@@ -169,6 +216,19 @@
     </div>
     <div class="spacer"></div>
     <button class="refresh" id="refreshBtn">↻ Refresh</button>
+  </div>
+
+  <div class="feature">
+    <div class="card">
+      <h2>Top species</h2>
+      <p class="hint">Most detected in <span id="topRangeLbl">range</span>.</p>
+      <div class="toplist" id="topSpecies"><div class="status">Loading…</div></div>
+    </div>
+    <div class="card">
+      <h2 id="arrivedTitle">Latest arrivals</h2>
+      <p class="hint" id="arrivedHint">Species first detected on the most recent day in range.</p>
+      <div class="arrgrid" id="arrivedToday"><div class="status">Loading…</div></div>
+    </div>
   </div>
 
   <div class="kpis" id="kpis">
@@ -348,6 +408,7 @@ const PERIODS = {
 
 let currentPeriod = "7d";
 const charts = {};                 // canvasId -> Chart instance
+let speciesMeta = {};              // speciesId -> { name, sci, color, thumb, bw, ebird, wiki, total }
 
 /* ------------------------------------------------------------------ */
 /* Sensor history store (persisted + exportable/importable)            */
@@ -553,6 +614,7 @@ async function rest(path){
 const Q_STATION = `query($id:ID!){
   station(id:$id){
     name state country type
+    coords { lat lon }
     earliestDetectionAt latestDetectionAt
     sensors {
       environment { temperature humidity barometricPressure aqi soundPressureLevel eco2 voc }
@@ -576,7 +638,7 @@ const Q_DET = `query($p:InputDuration,$after:String){
 const Q_SERIES = `query($p:InputDuration){
   daily: dailyDetectionCounts(period:$p, stationIds:["${STATION_ID}"]){
     date total
-    counts { speciesId count species { commonName color } }
+    counts { speciesId count species { commonName color scientificName thumbnailUrl birdweatherUrl ebirdUrl wikipediaUrl } }
   }
   hours: timeOfDayDetectionCounts(period:$p, stationIds:["${STATION_ID}"]){
     speciesId
@@ -628,6 +690,38 @@ function renderStation(s){
   }
 }
 
+// Small static map tile (OpenStreetMap raster tiles) centered on the station,
+// with a marker. No API key/library — a fixed-size tile mosaic positioned so
+// the station coordinate sits at the center, plus required OSM attribution.
+function renderMap(s){
+  const el = $("mapTile");
+  if(!el || !s || !s.coords || s.coords.lat==null) return;
+  const nm = $("locName"); if(nm) nm.textContent = s.name || ("Station "+STATION_ID);
+  const co = $("locCoords"); if(co) co.textContent = s.coords.lat.toFixed(4)+", "+s.coords.lon.toFixed(4);
+  if(el.dataset.built === "1") return;
+  const lat = s.coords.lat, lon = s.coords.lon;
+  const z = 12, W = 240, H = 130, T = 256, n = Math.pow(2,z);
+  const xf = (lon+180)/360*n;
+  const latRad = lat*Math.PI/180;
+  const yf = (1 - Math.log(Math.tan(latRad)+1/Math.cos(latRad))/Math.PI)/2*n;
+  const cx = xf*T, cy = yf*T;
+  const i0 = Math.floor((cx - W/2)/T), i1 = Math.floor((cx + W/2)/T);
+  const j0 = Math.floor((cy - H/2)/T), j1 = Math.floor((cy + H/2)/T);
+  let imgs = "";
+  for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
+    if(j<0 || j>=n) continue;
+    const tx = ((i%n)+n)%n;
+    const left = Math.round(i*T - cx + W/2), top = Math.round(j*T - cy + H/2);
+    imgs += '<img src="https://tile.openstreetmap.org/'+z+'/'+tx+'/'+j+'.png" width="'+T+'" height="'+T+'" loading="lazy" alt="" style="position:absolute;left:'+left+'px;top:'+top+'px">';
+  }
+  const osm = 'https://www.openstreetmap.org/?mlat='+lat+'&mlon='+lon+'#map='+z+'/'+lat+'/'+lon;
+  el.innerHTML = imgs +
+    '<span class="pin"></span>'+
+    '<a class="tilelink" href="'+osm+'" target="_blank" rel="noopener" title="Open map"></a>'+
+    '<span class="attr">\u00a9 <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OSM</a></span>';
+  el.dataset.built = "1";
+}
+
 function aggregate(daily, hours){
   // sort ascending by date
   const days = daily.slice().sort((a,b)=> a.date<b.date ? -1 : 1);
@@ -638,7 +732,17 @@ function aggregate(daily, hours){
   for(const d of days){
     grandTotal += d.total;
     for(const c of (d.counts||[])){
-      const cur = spTotals.get(c.speciesId) || {id:c.speciesId, name:c.species?.commonName||("#"+c.speciesId), color:c.species?.color||"#888", total:0};
+      const cur = spTotals.get(c.speciesId) || {
+        id:c.speciesId,
+        name:c.species?.commonName||("#"+c.speciesId),
+        sci:c.species?.scientificName||"",
+        color:c.species?.color||"#888",
+        thumb:c.species?.thumbnailUrl||"",
+        bw:c.species?.birdweatherUrl||"",
+        ebird:c.species?.ebirdUrl||"",
+        wiki:c.species?.wikipediaUrl||"",
+        total:0
+      };
       cur.total += c.count;
       spTotals.set(c.speciesId, cur);
     }
@@ -681,10 +785,10 @@ function aggregate(daily, hours){
     for(const c of (d.counts||[])){
       if(!firstSeen.has(c.speciesId)){
         firstSeen.add(c.speciesId);
-        newOnes.push(c.species?.commonName || ("#"+c.speciesId));
+        newOnes.push({ id:c.speciesId, name:c.species?.commonName || ("#"+c.speciesId) });
       }
     }
-    if(newOnes.length) arrivals.push({ date:d.date, names:newOnes });
+    if(newOnes.length) arrivals.push({ date:d.date, items:newOnes });
   }
 
   // cumulative detections (parallel to cum species) for accumulation curve
@@ -701,7 +805,11 @@ function aggregate(daily, hours){
 
   const activeDays = days.filter(d=>d.total>0).length || days.length || 1;
 
-  return { days, ranked, grandTotal, cum, cumDet, hourly, byHourSpecies, dow, arrivals, busy, peakH, peakV, activeDays };
+  // species metadata map (id -> ranked entry) for links/photos elsewhere
+  const meta = {};
+  for(const v of spTotals.values()) meta[String(v.id)] = v;
+
+  return { days, ranked, grandTotal, cum, cumDet, hourly, byHourSpecies, dow, arrivals, busy, peakH, peakV, activeDays, meta };
 }
 
 function renderKPIs(A){
@@ -867,17 +975,19 @@ function renderTable(A, images){
   const max = A.ranked[0].total;
   tb.innerHTML = A.ranked.map((s,i)=>{
     const img = images[s.id];
-    const thumb = img && img.thumbnailUrl
-      ? '<img src="'+img.thumbnailUrl+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+    const thumbUrl = (img && img.thumbnailUrl) || s.thumb;
+    const thumb = thumbUrl
+      ? '<img src="'+thumbUrl+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
       : '<span style="width:34px;height:34px;border-radius:8px;background:'+(s.color||"#333")+';flex:none;display:inline-block"></span>';
-    const sci = img && img.scientificName ? '<span class="sci">'+img.scientificName+'</span>' : '';
+    const sciTxt = s.sci || (img && img.scientificName) || "";
+    const sci = sciTxt ? '<span class="sci">'+sciTxt+'</span>' : '';
     const share = s.total/A.grandTotal;
     const lastIso = (img && img.latestDetectionAt) || null;
     const seen = timeAgo(lastIso);
     const seenTitle = lastIso ? new Date(lastIso).toLocaleString() : "";
     return '<tr>'+
       '<td class="rank">'+(i+1)+'</td>'+
-      '<td><div class="sp">'+thumb+'<div class="nm"><span>'+s.name+'</span>'+sci+'</div></div></td>'+
+      '<td><div class="sp">'+thumb+'<div class="nm"><span>'+s.name+'</span>'+sci+spLinks(s)+'</div></div></td>'+
       '<td class="num">'+fmt(s.total)+'</td>'+
       '<td class="num"><span class="pct">'+pct(share)+'</span></td>'+
       '<td style="color:var(--muted)" title="'+seenTitle+'">'+seen+'</td>'+
@@ -906,6 +1016,16 @@ function hexA(hex,a){
   if(!/^#([0-9a-f]{6})$/i.test(hex)) return hex;
   const n=parseInt(hex.slice(1),16);
   return "rgba("+(n>>16&255)+","+(n>>8&255)+","+(n&255)+","+a+")";
+}
+
+// Compact external-link row (BirdWeather · eBird · Wikipedia) for a species.
+function spLinks(m){
+  if(!m) return "";
+  const a=[];
+  if(m.bw)    a.push('<a href="'+m.bw+'" target="_blank" rel="noopener" title="BirdWeather">BirdWeather</a>');
+  if(m.ebird) a.push('<a href="'+m.ebird+'" target="_blank" rel="noopener" title="eBird">eBird</a>');
+  if(m.wiki)  a.push('<a href="'+m.wiki+'" target="_blank" rel="noopener" title="Wikipedia">Wikipedia</a>');
+  return a.length ? '<span class="lnks">'+a.join(" ")+'</span>' : "";
 }
 
 /* ------------------------------------------------------------------ */
@@ -1042,17 +1162,21 @@ function renderFeed(sample, images){
   if(!sample.length){ el.innerHTML='<li><span class="info">No recent detections.</span></li>'; return; }
   const items = sample.slice(0,24);
   el.innerHTML = items.map(d=>{
-    const img = images[String(d.speciesId)];
-    const thumb = img && img.thumbnailUrl
-      ? '<img src="'+img.thumbnailUrl+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+    const id = String(d.speciesId);
+    const img = images[id];
+    const m = speciesMeta[id] || {};
+    const thumbUrl = (img && img.thumbnailUrl) || m.thumb;
+    const thumb = thumbUrl
+      ? '<img src="'+thumbUrl+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
       : '<span class="swatch" style="background:'+(d.species?.color||"#333")+'"></span>';
     const t = new Date(d.timestamp);
     const when = t.toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
     const audio = d.soundscape && d.soundscape.url
       ? '<audio controls preload="none" src="'+d.soundscape.url+'"></audio>' : '';
+    const nm = m.bw ? '<a href="'+m.bw+'" target="_blank" rel="noopener">'+(d.species?.commonName||"Unknown")+'</a>' : (d.species?.commonName||"Unknown");
     return '<li>'+thumb+
-      '<div class="info"><div class="nm">'+(d.species?.commonName||"Unknown")+'</div>'+
-      '<div class="mt">'+when+' · '+timeAgo(d.timestamp)+'</div></div>'+
+      '<div class="info"><div class="nm">'+nm+'</div>'+
+      '<div class="mt">'+when+' · '+timeAgo(d.timestamp)+'</div>'+spLinks(m)+'</div>'+
       audio+
       '<div class="conf">'+(d.confidence!=null?(d.confidence*100).toFixed(0)+"%":"")+'</div>'+
     '</li>';
@@ -1182,8 +1306,54 @@ function renderArrivals(A){
   const rows = A.arrivals.slice().reverse();   // newest first
   el.innerHTML = rows.map(r=>
     '<li><span class="date">'+prettyDate(r.date)+'</span>'+
-    '<span class="names">'+r.names.map(n=>'<span class="n">'+n+'</span>').join("")+'</span></li>'
+    '<span class="names">'+r.items.map(it=>{
+      const m = A.meta[String(it.id)] || {};
+      const ti = m.thumb ? '<img class="ti" src="'+m.thumb+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '';
+      const nm = m.bw ? '<a href="'+m.bw+'" target="_blank" rel="noopener">'+it.name+'</a>' : it.name;
+      return '<span class="n">'+ti+nm+'</span>';
+    }).join("")+'</span></li>'
   ).join("");
+}
+
+// Top species — big-number style list with photos and external links.
+function renderTopSpecies(A){
+  const el = $("topSpecies"); if(!el) return;
+  const lbl = $("topRangeLbl"); if(lbl) lbl.textContent = PERIODS[currentPeriod].label;
+  const top = A.ranked.slice(0,5);
+  if(!top.length){ el.innerHTML='<div class="status">No detections in this range.</div>'; return; }
+  el.innerHTML = top.map((s,i)=>{
+    const thumb = s.thumb
+      ? '<img src="'+s.thumb+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+      : '<span class="ph" style="background:'+(s.color||"#333")+'"></span>';
+    const share = A.grandTotal ? s.total/A.grandTotal : 0;
+    return '<div class="toprow'+(i===0?' lead':'')+'">'+
+      '<span class="r">'+(i+1)+'</span>'+thumb+
+      '<div class="m"><div class="nm">'+s.name+'</div>'+spLinks(s)+'</div>'+
+      '<div class="big">'+fmt(s.total)+'<small>'+pct(share)+'</small></div>'+
+    '</div>';
+  }).join("");
+}
+
+// Latest arrivals — species first seen on the most recent day, with photos.
+function renderArrivedToday(A){
+  const el = $("arrivedToday"); if(!el) return;
+  if(!A.arrivals.length){ el.innerHTML='<div class="status">No new species in this range.</div>'; return; }
+  const last = A.arrivals[A.arrivals.length-1];
+  const now = new Date();
+  const todayYmd = now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0");
+  const isToday = last.date === todayYmd;
+  const title = $("arrivedTitle"); if(title) title.textContent = isToday ? "Arrived today" : "Latest arrivals";
+  const hint = $("arrivedHint");
+  if(hint) hint.textContent = isToday
+    ? last.items.length+" new species first detected today."
+    : "First detected "+prettyDate(last.date)+" — the most recent day a new species appeared in range.";
+  el.innerHTML = last.items.map(it=>{
+    const m = A.meta[String(it.id)] || {};
+    const thumb = m.thumb
+      ? '<img src="'+m.thumb+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+      : '<span class="ph" style="background:'+(m.color||"#333")+'"></span>';
+    return '<div class="arr">'+thumb+'<div><div class="nm">'+it.name+'</div>'+spLinks(m)+'</div></div>';
+  }).join("");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1232,7 +1402,7 @@ async function load(){
       fetchDetectionSample(p.dur, 600)
     ]);
     if(images) imageCache = images;
-    if(station){ charts._station = station.station; renderStation(charts._station); }
+    if(station){ charts._station = station.station; renderStation(charts._station); renderMap(charts._station); }
 
     // Accumulate this load's sensor readings into the persistent store.
     if(charts._station && charts._station.sensors && charts._station.sensors.environmentHistory){
@@ -1243,7 +1413,10 @@ async function load(){
 
     const A = aggregate(series.daily||[], series.hours||[]);
     charts._lastA = A;
+    speciesMeta = A.meta || {};
     renderKPIs(A);
+    renderTopSpecies(A);
+    renderArrivedToday(A);
     renderDaily(A);
     renderCumSpp(A);
     renderHour(A);
