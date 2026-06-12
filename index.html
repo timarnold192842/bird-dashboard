@@ -734,7 +734,7 @@ function renderMap(s){
   const co = $("locCoords"); if(co) co.textContent = s.coords.lat.toFixed(4)+", "+s.coords.lon.toFixed(4);
   if(el.dataset.built === "1") return;
   const lat = s.coords.lat, lon = s.coords.lon;
-  const z = 18, W = 240, H = 130, T = 256, n = Math.pow(2,z);
+  const z = 16, W = 240, H = 130, T = 256, n = Math.pow(2,z);
   const xf = (lon+180)/360*n;
   const latRad = lat*Math.PI/180;
   const yf = (1 - Math.log(Math.tan(latRad)+1/Math.cos(latRad))/Math.PI)/2*n;
