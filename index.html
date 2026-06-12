@@ -220,7 +220,7 @@
   @media (max-width:880px){ .feature{grid-template-columns:1fr} }
 
   /* bird detections timeline */
-  .timelinebox{overflow-x:auto;overflow-y:visible;padding-bottom:4px}
+  .timelinebox{overflow-x:auto;overflow-y:visible;padding-top:18px;padding-bottom:4px}
   .timelineinner{position:relative;height:252px;min-width:1200px;background:linear-gradient(180deg,#141b27 0,#121925 100%);border:1px solid var(--line);border-radius:12px}
   .tl-base{position:absolute;left:26px;right:26px;bottom:30px;height:2px;background:#2a3342}
   .tl-tick{position:absolute;bottom:24px;width:1px;height:12px;background:#2f3b4e}
@@ -234,11 +234,9 @@
   .tl-col .dot img{width:100%;height:100%;object-fit:cover;display:block}
   .tl-col .dot .ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:12px;color:#d9e2ef;font-weight:700}
   .tl-col .cnt{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;font-size:10.5px;color:#c9d4e3;background:#1a2432;border:1px solid #2f3d52;padding:0 6px;border-radius:999px;line-height:17px;height:17px;pointer-events:none}
-  .tl-gap{position:absolute;top:14px;bottom:30px;width:52px;transform:translateX(-50%);background:linear-gradient(180deg,#101a2a 0,#1b2940 100%);opacity:.99;border-left:1px solid #30425d;border-right:1px solid #30425d;box-shadow:0 0 0 1px rgba(0,0,0,.2);overflow:visible}
-  .tl-gap::before,.tl-gap::after{content:"";position:absolute;left:-1px;right:-1px;height:24px;pointer-events:none;background:#1b2940;border-left:1px solid #30425d;border-right:1px solid #30425d}
-  .tl-gap::before{top:-24px;clip-path:polygon(0% 100%,12.5% 0%,25% 100%,37.5% 0%,50% 100%,62.5% 0%,75% 100%,87.5% 0%,100% 100%)}
-  .tl-gap::after{bottom:-24px;clip-path:polygon(0% 0%,12.5% 100%,25% 0%,37.5% 100%,50% 0%,62.5% 100%,75% 0%,87.5% 100%,100% 0%)}
-  .tl-gaplbl{position:absolute;top:4px;left:50%;transform:translateX(-50%);font-size:10.5px;color:var(--muted);background:#151d2a;padding:1px 6px;border-radius:999px;border:1px solid #2d3a4d;white-space:nowrap}
+  .tl-gap{position:absolute;top:-14px;height:250px;width:74px;transform:translateX(-50%);pointer-events:none;overflow:visible;z-index:1}
+  .tl-gap svg{display:block;width:100%;height:100%;overflow:visible}
+  .tl-gaplbl{position:absolute;top:2px;left:50%;transform:translateX(-50%);font-size:10.5px;color:var(--muted);background:#151d2a;padding:1px 6px;border-radius:999px;border:1px solid #2d3a4d;white-space:nowrap;z-index:3}
   .tl-tip{position:fixed;z-index:10000;pointer-events:none;background:#0f1623;color:#d9e3f2;border:1px solid #2f3d52;border-radius:8px;padding:6px 8px;box-shadow:0 8px 24px rgba(0,0,0,.35);font-size:12px;line-height:1.25;max-width:280px;display:none;white-space:normal}
   .tlhelp{color:var(--muted);font-size:12px;margin-top:8px}
   @media (max-width:560px){ .timelineinner{height:220px} .tlhelp{font-size:11px} }
@@ -1368,15 +1366,25 @@ function renderDetectionTimeline(detections, images){
     html += '<div class="tl-tick" style="left:'+x+'px"></div><div class="'+lblCls+'" style="left:'+x+'px">'+lbl+'</div>';
   }
 
+  // Torn-paper gap: single SVG polygon with a continuous stroked outline so the
+  // border wraps unbroken around both sides and every tooth. Teeth extend above
+  // the timeline top and below the baseline.
+  const GAPW=74, GH=250, TH=13, NTEETH=4, TWPX=GAPW/NTEETH;
+  const gapPts=[];
+  for(let k=0;k<=NTEETH;k++){ gapPts.push((k*TWPX).toFixed(1)+','+((k%2)?0:TH)); }
+  for(let k=NTEETH;k>=0;k--){ gapPts.push((k*TWPX).toFixed(1)+','+((k%2)?GH:GH-TH)); }
+  const gapPtsStr = gapPts.join(' ');
+  const gapSvg = '<svg viewBox="0 0 '+GAPW+' '+GH+'" preserveAspectRatio="none">'+
+    '<polygon points="'+gapPtsStr+'" fill="#16223a" stroke="#3c4f6e" stroke-width="1.4" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>';
   for(const gp of gaps){
     const x = xAt(gp.eff);
     const h = gp.real/36e5;
     const lbl = h>=24 ? (h/24).toFixed(1)+'d gap' : h.toFixed(1)+'h gap';
-    html += '<div class="tl-gap" style="left:'+x+'px"></div><div class="tl-gaplbl" style="left:'+x+'px">'+lbl+'</div>';
+    html += '<div class="tl-gap" style="left:'+x+'px">'+gapSvg+'</div><div class="tl-gaplbl" style="left:'+x+'px">'+lbl+'</div>';
   }
 
   const shiftByIndex = {};
-  const gapNudgePx = 64;
+  const gapNudgePx = 80;
   for(const gp of gaps){
     shiftByIndex[gp.i] = (shiftByIndex[gp.i] || 0) + gapNudgePx;
     if(gp.i+1 < rows.length) shiftByIndex[gp.i+1] = (shiftByIndex[gp.i+1] || 0) + Math.round(gapNudgePx*0.55);
@@ -1384,17 +1392,27 @@ function renderDetectionTimeline(detections, images){
     if(gp.i-2 >= 0) shiftByIndex[gp.i-2] = (shiftByIndex[gp.i-2] || 0) - Math.round(gapNudgePx*0.55);
   }
 
+  // Keep every marker fully clear of each gap band (half-width 37 + avatar radius + margin).
+  // Merge overlapping forbidden bands so markers trapped between two close gaps snap
+  // to the outer edge of the whole cluster instead of landing inside a neighbour.
   const gapCenters = gaps.map(gp=>xAt(gp.eff));
-  const minGapCenterDx = 74;
+  const minGapCenterDx = 72;
+  const forbidden = gapCenters.map(gc=>[gc-minGapCenterDx, gc+minGapCenterDx]).sort((a,b)=>a[0]-b[0]);
+  const mergedBands = [];
+  for(const b of forbidden){
+    const last = mergedBands[mergedBands.length-1];
+    if(last && b[0] <= last[1]){ last[1] = Math.max(last[1], b[1]); }
+    else mergedBands.push([b[0], b[1]]);
+  }
+  const clampOutOfGaps = (x)=>{
+    for(const band of mergedBands){
+      if(x > band[0] && x < band[1]){ x = (x - band[0]) < (band[1] - x) ? band[0] : band[1]; }
+    }
+    return x;
+  };
   for(let i=0;i<rows.length;i++){
     const r = rows[i];
-    let x = xAt(eff[i]) + (shiftByIndex[i] || 0);
-    for(const gx of gapCenters){
-      const dx = x - gx;
-      if(Math.abs(dx) < minGapCenterDx){
-        x = gx + (dx < 0 ? -minGapCenterDx : minGapCenterDx);
-      }
-    }
+    let x = clampOutOfGaps(xAt(eff[i]) + (shiftByIndex[i] || 0));
     const mag = 24 + (Math.log1p(r.total)/Math.log1p(maxTotal))*128;
     const sz = 24 + Math.min(20, Math.sqrt(r.top.c)*4);
     const m = speciesMeta[r.top.id] || {};
