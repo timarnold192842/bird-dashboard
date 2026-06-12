@@ -4,7 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Bird Dashboard · Station 27598</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <style>
   :root{
     --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2a313c;
@@ -27,6 +29,8 @@
   .title .sub{color:var(--muted);font-size:13.5px;margin-top:4px}
   .title .sub b{color:var(--txt);font-weight:600}
   .live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+  .iconbtn{background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:6px 10px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:600}
+  .iconbtn:hover{color:var(--txt);border-color:var(--accent)}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 0 rgba(6,214,160,.6);animation:pulse 2s infinite}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(6,214,160,.55)}70%{box-shadow:0 0 0 8px rgba(6,214,160,0)}100%{box-shadow:0 0 0 0 rgba(6,214,160,0)}}
 
@@ -110,12 +114,6 @@
   .feed .info{min-width:0;flex:1}
   .feed .info .nm{font-weight:600;font-size:13.5px}
   .feed .info .mt{color:var(--muted);font-size:11.5px;margin-top:1px}
-  .feed .info .am{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:3px}
-  .feed .info .am .loud{font-size:11px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);color:var(--muted)}
-  .feed .info .am .loud.vq{color:#ffd166;border-color:#745a1c}
-  .feed .info .am .loud.silent{color:#ef476f;border-color:#6d2233}
-  .feed .info .am .openbw{font-size:11px;color:var(--muted)}
-  .feed .info .am .openbw:hover{color:var(--accent)}
   .feed .conf{font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted);text-align:right;min-width:54px}
   .feed audio{height:34px;flex:none;max-width:200px}
   @media (max-width:560px){ .feed audio{max-width:130px} }
@@ -127,6 +125,17 @@
   .feedtools .aseg button.active{background:var(--accent);color:#04121c;font-weight:700}
   .feedtools .tog{display:inline-flex;gap:6px;align-items:center;color:var(--muted);font-size:12px}
   .feedtools .tog input{accent-color:var(--accent)}
+
+  /* audio settings modal */
+  body.modal-open{overflow:hidden}
+  .modal{position:fixed;inset:0;background:rgba(4,8,13,.66);display:flex;align-items:center;justify-content:center;padding:16px;z-index:1200}
+  .modal[hidden]{display:none}
+  .modal .cardm{width:min(560px,96vw);background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:16px}
+  .modal .head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+  .modal .head h3{margin:0;font-size:16px}
+  .modal .close{appearance:none;border:1px solid var(--line);background:var(--panel2);color:var(--muted);width:28px;height:28px;border-radius:8px;cursor:pointer}
+  .modal .close:hover{color:var(--txt);border-color:var(--accent)}
+  .modal .hint{margin:0 0 12px;color:var(--muted);font-size:12px}
 
   /* sensor history store toolbar */
   .storebar{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
@@ -161,15 +170,12 @@
 
   /* shared station location card */
   .locbar{display:flex;align-items:center;gap:16px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow);margin:14px 0 4px}
-  .maptile{position:relative;width:240px;height:130px;border-radius:10px;overflow:hidden;flex:none;background:var(--panel2);border:1px solid var(--line)}
-  .maptile a.tilelink{position:absolute;inset:0;display:block;z-index:3}
-  .maptile .pin{position:absolute;left:50%;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:var(--accent);border:2px solid #04121c;box-shadow:0 0 0 4px rgba(76,201,240,.3);z-index:2;pointer-events:none}
-  .maptile .attr{position:absolute;right:2px;bottom:1px;font-size:8.5px;color:#000a;background:#ffffffb0;padding:0 3px;border-radius:3px;z-index:2}
-  .maptile .attr a{color:#06c}
+  .maptile{width:360px;height:210px;border-radius:10px;overflow:hidden;flex:none;background:var(--panel2);border:1px solid var(--line)}
+  .maptile .leaflet-control-attribution{font-size:9px}
   .locmeta{min-width:0}
   .locmeta .nm{font-weight:600;font-size:15px}
   .locmeta .co{color:var(--muted);font-size:12.5px;margin-top:3px}
-  @media (max-width:560px){ .maptile{width:150px;height:110px} }
+  @media (max-width:560px){ .maptile{width:210px;height:140px} }
 
   /* feature row: top species + latest arrivals */
   .feature{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:18px 0 22px}
@@ -202,7 +208,10 @@
       <h1>🐦 Bird Dashboard</h1>
       <div class="sub" id="stationLine">Loading station…</div>
     </div>
-    <div class="live"><span class="dot"></span><span id="liveLine">connecting…</span></div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <button class="iconbtn" id="audioSettingsBtn">🔊 Audio settings</button>
+      <div class="live"><span class="dot"></span><span id="liveLine">connecting…</span></div>
+    </div>
   </header>
 
   <nav class="tabs" id="tabs">
@@ -338,17 +347,6 @@
     <div class="card span2">
       <h2>Recent detections</h2>
       <p class="hint">The latest identifications with playable audio — listen to verify the calls yourself.</p>
-      <div class="feedtools" id="feedTools">
-        <span class="lbl">Playback</span>
-        <div class="aseg" id="boostSeg">
-          <button data-g="1">1x</button>
-          <button data-g="2" class="active">2x</button>
-          <button data-g="4">4x</button>
-          <button data-g="8">8x</button>
-          <button data-g="12">12x</button>
-        </div>
-        <label class="tog"><input type="checkbox" id="autoLevel"> Auto-level</label>
-      </div>
       <ul class="feed" id="feed"><li><span class="info">Loading…</span></li></ul>
     </div>
 
@@ -413,6 +411,27 @@
   </p>
 </div>
 
+<div class="modal" id="audioModal" hidden>
+  <div class="cardm" role="dialog" aria-modal="true" aria-labelledby="audioModalTitle">
+    <div class="head">
+      <h3 id="audioModalTitle">Audio Playback Settings</h3>
+      <button class="close" id="audioModalClose" aria-label="Close">✕</button>
+    </div>
+    <p class="hint">Applies to all clips on the page, including Recent detections and All species sample audio.</p>
+    <div class="feedtools" id="feedTools">
+      <span class="lbl">Gain</span>
+      <div class="aseg" id="boostSeg">
+        <button data-g="1">1x</button>
+        <button data-g="2" class="active">2x</button>
+        <button data-g="4">4x</button>
+        <button data-g="8">8x</button>
+        <button data-g="12">12x</button>
+      </div>
+      <label class="tog"><input type="checkbox" id="autoLevel"> Auto-level</label>
+    </div>
+  </div>
+</div>
+
 <script>
 "use strict";
 
@@ -436,7 +455,8 @@ const PERIODS = {
 let currentPeriod = "7d";
 const charts = {};                 // canvasId -> Chart instance
 let speciesMeta = {};              // speciesId -> { name, sci, color, thumb, bw, ebird, wiki, total }
-const loudnessCache = new Map();   // audio URL -> { cls, label }
+let mapObj = null;
+let mapMarker = null;
 const audioFx = {                  // shared playback settings for all feed clips
   boost: 2,
   auto: false,
@@ -724,36 +744,31 @@ function renderStation(s){
   }
 }
 
-// Small static map tile (OpenStreetMap raster tiles) centered on the station,
-// with a marker. No API key/library — a fixed-size tile mosaic positioned so
-// the station coordinate sits at the center, plus required OSM attribution.
+// Interactive Leaflet map tile centered on the station.
 function renderMap(s){
   const el = $("mapTile");
   if(!el || !s || !s.coords || s.coords.lat==null) return;
   const nm = $("locName"); if(nm) nm.textContent = s.name || ("Station "+STATION_ID);
   const co = $("locCoords"); if(co) co.textContent = s.coords.lat.toFixed(4)+", "+s.coords.lon.toFixed(4);
-  if(el.dataset.built === "1") return;
   const lat = s.coords.lat, lon = s.coords.lon;
-  const z = 16, W = 240, H = 130, T = 256, n = Math.pow(2,z);
-  const xf = (lon+180)/360*n;
-  const latRad = lat*Math.PI/180;
-  const yf = (1 - Math.log(Math.tan(latRad)+1/Math.cos(latRad))/Math.PI)/2*n;
-  const cx = xf*T, cy = yf*T;
-  const i0 = Math.floor((cx - W/2)/T), i1 = Math.floor((cx + W/2)/T);
-  const j0 = Math.floor((cy - H/2)/T), j1 = Math.floor((cy + H/2)/T);
-  let imgs = "";
-  for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
-    if(j<0 || j>=n) continue;
-    const tx = ((i%n)+n)%n;
-    const left = Math.round(i*T - cx + W/2), top = Math.round(j*T - cy + H/2);
-    imgs += '<img src="https://tile.openstreetmap.org/'+z+'/'+tx+'/'+j+'.png" width="'+T+'" height="'+T+'" loading="lazy" alt="" style="position:absolute;left:'+left+'px;top:'+top+'px">';
+  if(typeof L === "undefined") return; // Leaflet failed to load.
+  if(!mapObj){
+    mapObj = L.map(el, {
+      zoomControl: true,
+      attributionControl: true,
+      scrollWheelZoom: false
+    }).setView([lat, lon], 16);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(mapObj);
+    mapMarker = L.marker([lat, lon]).addTo(mapObj).bindPopup((s.name||("Station "+STATION_ID))+"<br>"+lat.toFixed(4)+", "+lon.toFixed(4));
+  }else{
+    mapObj.setView([lat, lon], mapObj.getZoom()||16);
+    if(mapMarker) mapMarker.setLatLng([lat, lon]);
   }
-  const osm = 'https://www.openstreetmap.org/?mlat='+lat+'&mlon='+lon+'#map='+z+'/'+lat+'/'+lon;
-  el.innerHTML = imgs +
-    '<span class="pin"></span>'+
-    '<a class="tilelink" href="'+osm+'" target="_blank" rel="noopener" title="Open map"></a>'+
-    '<span class="attr">\u00a9 <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OSM</a></span>';
-  el.dataset.built = "1";
+  // Leaflet needs a resize tick when created in a flex card.
+  setTimeout(()=>{ if(mapObj) mapObj.invalidateSize(); }, 80);
 }
 
 function aggregate(daily, hours){
@@ -1115,53 +1130,6 @@ function hookAudioFx(audio){
   }
 }
 
-function classifyLoudness(db){
-  if(!isFinite(db)) return { cls:"silent", label:"silent" };
-  if(db < -38) return { cls:"silent", label:"near-silent" };
-  if(db < -31) return { cls:"vq", label:"very quiet" };
-  if(db < -25) return { cls:"", label:"quiet" };
-  return { cls:"", label:"audible" };
-}
-
-async function loudnessFor(url){
-  if(loudnessCache.has(url)) return loudnessCache.get(url);
-  try{
-    const r = await fetch(url, { mode:"cors" });
-    if(!r.ok) throw new Error("audio fetch "+r.status);
-    const ab = await r.arrayBuffer();
-    const ctx = ensureAudioContext();
-    if(!ctx) throw new Error("no audio context");
-    const buf = await ctx.decodeAudioData(ab.slice(0));
-    let sum = 0, n = 0;
-    const step = 32;
-    for(let c=0;c<buf.numberOfChannels;c++){
-      const ch = buf.getChannelData(c);
-      for(let i=0;i<ch.length;i+=step){ const v = ch[i]; sum += v*v; n++; }
-    }
-    const rms = Math.sqrt(sum/Math.max(1,n));
-    const db = 20*Math.log10(Math.max(1e-8, rms));
-    const out = classifyLoudness(db);
-    loudnessCache.set(url, out);
-    return out;
-  }catch(_e){
-    const out = { cls:"", label:"unknown" };
-    loudnessCache.set(url, out);
-    return out;
-  }
-}
-
-async function refreshLoudnessBadges(){
-  const badges = document.querySelectorAll("#feed [data-audbadge]");
-  for(const b of badges){
-    const url = b.getAttribute("data-audbadge");
-    if(!url) continue;
-    const lv = await loudnessFor(url);
-    b.classList.remove("skel","vq","silent");
-    if(lv.cls) b.classList.add(lv.cls);
-    b.textContent = lv.label;
-  }
-}
-
 function applyAudioFxToAll(){
   document.querySelectorAll("audio").forEach(hookAudioFx);
 }
@@ -1312,22 +1280,17 @@ function renderFeed(sample, images){
     const audio = d.soundscape && d.soundscape.url
       ? '<audio controls preload="none" crossorigin="anonymous" src="'+d.soundscape.url+'"></audio>' : '';
     const nm = m.bw ? '<a href="'+m.bw+'" target="_blank" rel="noopener">'+(d.species?.commonName||"Unknown")+'</a>' : (d.species?.commonName||"Unknown");
-    const openBw = m.bw ? '<a class="openbw" href="'+m.bw+'" target="_blank" rel="noopener">Open on BirdWeather</a>' : '';
-    const loud = d.soundscape && d.soundscape.url
-      ? '<span class="loud skel" data-audbadge="'+d.soundscape.url+'">analyzing…</span>'
-      : '<span class="loud">no audio</span>';
     return '<li>'+thumb+
       '<div class="info"><div class="nm">'+nm+'</div>'+
       '<div class="mt">'+when+' · '+timeAgo(d.timestamp)+'</div>'+spLinks(m)+
-      '<div class="am">'+loud+openBw+'</div></div>'+
+      '</div>'+
       audio+
       '<div class="conf">'+(d.confidence!=null?(d.confidence*100).toFixed(0)+"%":"")+'</div>'+
     '</li>';
   }).join("");
 
-  // Apply shared playback FX and loudness labels after the rows are in DOM.
+  // Apply shared playback FX after the rows are in DOM.
   applyAudioFxToAll();
-  refreshLoudnessBadges();
 }
 
 // #7 Environment — a small dashboard widget (current value + sparkline) per sensor
@@ -1621,6 +1584,24 @@ $("periodSeg").addEventListener("click",(e)=>{
   load();
 });
 $("refreshBtn").addEventListener("click", load);
+
+function openAudioModal(){
+  const m = $("audioModal");
+  if(!m) return;
+  m.hidden = false;
+  document.body.classList.add("modal-open");
+}
+function closeAudioModal(){
+  const m = $("audioModal");
+  if(!m) return;
+  m.hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
+$("audioSettingsBtn").addEventListener("click", openAudioModal);
+$("audioModalClose").addEventListener("click", closeAudioModal);
+$("audioModal").addEventListener("click", (e)=>{ if(e.target.id === "audioModal") closeAudioModal(); });
+document.addEventListener("keydown", (e)=>{ if(e.key === "Escape" && !$("audioModal").hidden) closeAudioModal(); });
 
 $("boostSeg").addEventListener("click", (e)=>{
   const b = e.target.closest("button[data-g]"); if(!b) return;
