@@ -232,10 +232,10 @@
   .tl-col .dot img{width:100%;height:100%;object-fit:cover;display:block}
   .tl-col .dot .ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:12px;color:#d9e2ef;font-weight:700}
   .tl-col .cnt{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;font-size:10.5px;color:#c9d4e3;background:#1a2432;border:1px solid #2f3d52;padding:0 6px;border-radius:999px;line-height:17px;height:17px;pointer-events:none}
-  .tl-gap{position:absolute;top:14px;bottom:38px;width:18px;transform:translateX(-50%);background:linear-gradient(180deg,#111927 0,#182334 100%);opacity:.95;box-shadow:inset 0 0 0 1px #2a3649}
-  .tl-gap::before,.tl-gap::after{content:"";position:absolute;top:0;bottom:0;width:8px;background-size:8px 12px;background-repeat:repeat-y}
-  .tl-gap::before{left:-8px;background-image:linear-gradient(-45deg,transparent 0 50%,#182334 50% 100%)}
-  .tl-gap::after{right:-8px;background-image:linear-gradient(45deg,transparent 0 50%,#182334 50% 100%)}
+  .tl-gap{position:absolute;top:18px;bottom:30px;width:24px;transform:translateX(-50%);background:linear-gradient(180deg,#0f1826 0,#1a273b 100%);opacity:.97;box-shadow:inset 0 0 0 1px #2a3950, 0 0 0 1px rgba(0,0,0,.18)}
+  .tl-gap::before,.tl-gap::after{content:"";position:absolute;top:0;bottom:0;width:12px;background:#1a273b}
+  .tl-gap::before{left:-12px;-webkit-mask-image:repeating-linear-gradient(-45deg,#000 0 8px,transparent 8px 16px);mask-image:repeating-linear-gradient(-45deg,#000 0 8px,transparent 8px 16px)}
+  .tl-gap::after{right:-12px;-webkit-mask-image:repeating-linear-gradient(45deg,#000 0 8px,transparent 8px 16px);mask-image:repeating-linear-gradient(45deg,#000 0 8px,transparent 8px 16px)}
   .tl-gaplbl{position:absolute;top:4px;left:50%;transform:translateX(-50%);font-size:10.5px;color:var(--muted);background:#151d2a;padding:1px 6px;border-radius:999px;border:1px solid #2d3a4d;white-space:nowrap}
   .tl-tip{position:fixed;z-index:10000;pointer-events:none;background:#0f1623;color:#d9e3f2;border:1px solid #2f3d52;border-radius:8px;padding:6px 8px;box-shadow:0 8px 24px rgba(0,0,0,.35);font-size:12px;line-height:1.25;max-width:280px;display:none;white-space:normal}
   .tlhelp{color:var(--muted);font-size:12px;margin-top:8px}
@@ -1374,7 +1374,7 @@ function renderDetectionTimeline(detections, images){
   }
 
   const shiftByIndex = {};
-  const gapNudgePx = 13;
+  const gapNudgePx = 20;
   for(const gp of gaps){
     shiftByIndex[gp.i] = (shiftByIndex[gp.i] || 0) + gapNudgePx;
     if(gp.i-1 >= 0) shiftByIndex[gp.i-1] = (shiftByIndex[gp.i-1] || 0) - gapNudgePx;
