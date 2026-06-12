@@ -801,8 +801,47 @@ function periodCutoff(periodKey, maxTs){
 function detectionsInPeriod(nodes, periodKey){
   if(!nodes.length) return [];
   const maxTs = +new Date(nodes[nodes.length-1].timestamp);
-  const cut = periodCutoff(periodKey, maxTs);
+  const anchor = Date.now();
+  const cut = periodCutoff(periodKey, Math.max(anchor, maxTs));
   return nodes.filter(d=> +new Date(d.timestamp) >= cut);
+}
+function ymdLocal(ts){
+  const d = new Date(ts);
+  if(isNaN(+d)) return "";
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
+function computeArrivalsFromDetections(inRangeNodes, allNodes){
+  const all = (allNodes||[]).slice().sort((a,b)=> a.timestamp<b.timestamp ? -1 : 1);
+  const firstDateBySpecies = new Map();
+  const firstNameBySpecies = new Map();
+  for(const d of all){
+    if(!d || d.speciesId==null || !d.timestamp) continue;
+    const id = String(d.speciesId);
+    if(!firstDateBySpecies.has(id)){
+      firstDateBySpecies.set(id, ymdLocal(d.timestamp));
+      firstNameBySpecies.set(id, (d.species && d.species.commonName) ? d.species.commonName : ("#"+id));
+    }
+  }
+
+  const byDate = new Map();
+  const seenOnDate = new Set();
+  const inRange = (inRangeNodes||[]).slice().sort((a,b)=> a.timestamp<b.timestamp ? -1 : 1);
+  for(const d of inRange){
+    if(!d || d.speciesId==null || !d.timestamp) continue;
+    const id = String(d.speciesId);
+    const date = ymdLocal(d.timestamp);
+    if(!date || firstDateBySpecies.get(id) !== date) continue;
+    const k = date+"|"+id;
+    if(seenOnDate.has(k)) continue;
+    seenOnDate.add(k);
+    let row = byDate.get(date);
+    if(!row){ row = []; byDate.set(date, row); }
+    row.push({ id, name:firstNameBySpecies.get(id) || ((d.species && d.species.commonName) ? d.species.commonName : ("#"+id)) });
+  }
+
+  return [...byDate.entries()]
+    .sort((a,b)=> a[0]<b[0] ? -1 : 1)
+    .map(([date,items])=>({ date, items:items.sort((a,b)=> a.name.localeCompare(b.name)) }));
 }
 function buildSeriesFromDetections(nodes){
   const dailyByDate = new Map();
@@ -1097,6 +1136,45 @@ function aggregate(daily, hours){
   for(const v of spTotals.values()) meta[String(v.id)] = v;
 
   return { days, ranked, grandTotal, cum, cumDet, hourly, byHourSpecies, dow, arrivals, busy, peakH, peakV, activeDays, meta };
+}
+
+function enrichAggregateMeta(A, liveDaily, images){
+  const liveMeta = {};
+  for(const d of (liveDaily||[])){
+    for(const c of (d.counts||[])){
+      const sid = String(c.speciesId);
+      const sp = c.species || {};
+      const cur = liveMeta[sid] || {};
+      liveMeta[sid] = {
+        commonName: sp.commonName || cur.commonName || "",
+        scientificName: sp.scientificName || cur.scientificName || "",
+        color: sp.color || cur.color || "",
+        thumbnailUrl: sp.thumbnailUrl || cur.thumbnailUrl || "",
+        birdweatherUrl: sp.birdweatherUrl || cur.birdweatherUrl || "",
+        ebirdUrl: sp.ebirdUrl || cur.ebirdUrl || "",
+        wikipediaUrl: sp.wikipediaUrl || cur.wikipediaUrl || ""
+      };
+    }
+  }
+
+  const applyMeta = (sid, target)=>{
+    const lm = liveMeta[sid] || {};
+    const im = (images && images[sid]) || {};
+    if(!target.name || /^#/.test(target.name)) target.name = lm.commonName || target.name;
+    if(!target.color || target.color==="#888") target.color = lm.color || target.color;
+    if(!target.sci) target.sci = lm.scientificName || im.scientificName || "";
+    if(!target.thumb) target.thumb = lm.thumbnailUrl || im.thumbnailUrl || "";
+    if(!target.bw) target.bw = lm.birdweatherUrl || "";
+    if(!target.ebird) target.ebird = lm.ebirdUrl || "";
+    if(!target.wiki) target.wiki = lm.wikipediaUrl || "";
+  };
+
+  for(const s of (A.ranked||[])) applyMeta(String(s.id), s);
+  A.meta = A.meta || {};
+  for(const s of (A.ranked||[])){
+    const sid = String(s.id);
+    A.meta[sid] = Object.assign({}, A.meta[sid] || {}, s);
+  }
 }
 
 function renderKPIs(A){
@@ -1784,7 +1862,7 @@ function renderActVsTemp(A, station){
 }
 
 // #3 New species arrivals timeline
-function renderArrivals(A){
+function renderArrivals(A, images){
   const el = $("arrivals");
   if(!A.arrivals.length){ el.innerHTML='<li><span class="names">No data.</span></li>'; return; }
   const rows = A.arrivals.slice().reverse();   // newest first
@@ -1792,22 +1870,25 @@ function renderArrivals(A){
     '<li><span class="date">'+prettyDate(r.date)+'</span>'+
     '<span class="names">'+r.items.map(it=>{
       const m = A.meta[String(it.id)] || {};
-      const ti = m.thumb ? '<img class="ti" src="'+m.thumb+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '';
-      const nm = m.bw ? '<a href="'+m.bw+'" target="_blank" rel="noopener">'+it.name+'</a>' : it.name;
+      const img = (images && images[String(it.id)] && images[String(it.id)].thumbnailUrl) || m.thumb || "";
+      const ti = img ? '<img class="ti" src="'+img+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '';
+      const nmTxt = m.name || it.name;
+      const nm = m.bw ? '<a href="'+m.bw+'" target="_blank" rel="noopener">'+nmTxt+'</a>' : nmTxt;
       return '<span class="n">'+ti+nm+'</span>';
     }).join("")+'</span></li>'
   ).join("");
 }
 
 // Top species — big-number style list with photos and external links.
-function renderTopSpecies(A){
+function renderTopSpecies(A, images){
   const el = $("topSpecies"); if(!el) return;
   const lbl = $("topRangeLbl"); if(lbl) lbl.textContent = PERIODS[currentPeriod].label;
   const top = A.ranked.slice(0,5);
   if(!top.length){ el.innerHTML='<div class="status">No detections in this range.</div>'; return; }
   el.innerHTML = top.map((s,i)=>{
-    const thumb = s.thumb
-      ? '<img src="'+s.thumb+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+    const img = (images && images[String(s.id)] && images[String(s.id)].thumbnailUrl) || s.thumb || "";
+    const thumb = img
+      ? '<img src="'+img+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
       : '<span class="ph" style="background:'+(s.color||"#333")+'"></span>';
     const share = A.grandTotal ? s.total/A.grandTotal : 0;
     return '<div class="toprow'+(i===0?' lead':'')+'">'+
@@ -1819,7 +1900,7 @@ function renderTopSpecies(A){
 }
 
 // Latest arrivals — species first seen on the most recent day, with photos.
-function renderArrivedToday(A){
+function renderArrivedToday(A, images){
   const el = $("arrivedToday"); if(!el) return;
   if(!A.arrivals.length){ el.innerHTML='<div class="status">No new species in this range.</div>'; return; }
   const last = A.arrivals[A.arrivals.length-1];
@@ -1833,10 +1914,11 @@ function renderArrivedToday(A){
     : "First detected "+prettyDate(last.date)+" — the most recent day a new species appeared in range.";
   el.innerHTML = last.items.map(it=>{
     const m = A.meta[String(it.id)] || {};
-    const thumb = m.thumb
-      ? '<img src="'+m.thumb+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+    const img = (images && images[String(it.id)] && images[String(it.id)].thumbnailUrl) || m.thumb || "";
+    const thumb = img
+      ? '<img src="'+img+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
       : '<span class="ph" style="background:'+(m.color||"#333")+'"></span>';
-    return '<div class="arr">'+thumb+'<div><div class="nm">'+it.name+'</div>'+spLinks(m)+'</div></div>';
+    return '<div class="arr">'+thumb+'<div><div class="nm">'+(m.name||it.name)+'</div>'+spLinks(m)+'</div></div>';
   }).join("");
 }
 
@@ -1925,12 +2007,14 @@ async function load(){
       : (sampleLive||[]);
 
     const A = aggregate(seriesSrc.daily||[], seriesSrc.hours||[]);
+    enrichAggregateMeta(A, series.daily||[], imageCache||{});
+    A.arrivals = computeArrivalsFromDetections(persistedInRange.length ? persistedInRange : (sampleLive||[]), persistedAll.length ? persistedAll : (sampleLive||[]));
     const samplesBySpecies = indexSpeciesSamples(sample);
     charts._lastA = A;
     speciesMeta = A.meta || {};
     renderKPIs(A);
-    renderTopSpecies(A);
-    renderArrivedToday(A);
+    renderTopSpecies(A, imageCache||{});
+    renderArrivedToday(A, imageCache||{});
     renderDaily(A);
     renderCumSpp(A);
     renderHour(A);
@@ -1945,7 +2029,7 @@ async function load(){
     renderHeatmap(A);
     renderDow(A);
     renderAccum(A);
-    renderArrivals(A);
+    renderArrivals(A, imageCache||{});
     renderConfidence(sample);
     renderScatter(sample, A);
     renderFeed(sample, imageCache||{});
