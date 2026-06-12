@@ -1,0 +1,42 @@
+name: Collect sensor history
+
+on:
+  schedule:
+    # Every 6 hours (the API only serves ~10h, so this always overlaps).
+    - cron: "0 */6 * * *"
+  workflow_dispatch: {}   # allow manual runs from the Actions tab
+
+# Allow the workflow to commit the updated JSON back to the repo.
+permissions:
+  contents: write
+
+concurrency:
+  group: collect-sensor-history
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Collect readings
+        run: python collector.py
+
+      - name: Commit updated history
+        run: |
+          git config user.name  "bird-collector[bot]"
+          git config user.email "bird-collector@users.noreply.github.com"
+          if git diff --quiet -- birds-sensor-history.json; then
+            echo "No changes to commit."
+          else
+            git add birds-sensor-history.json
+            git commit -m "chore: update sensor history ($(date -u +%FT%TZ))"
+            git push
+          fi

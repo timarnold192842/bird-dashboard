@@ -1,0 +1,1338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bird Dashboard · Station 27598</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2a313c;
+    --txt:#e6edf3; --muted:#8b98a9; --accent:#4cc9f0; --accent2:#80ed99;
+    --warn:#ffd166; --bad:#ef476f; --good:#06d6a0;
+    --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.25);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--txt);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1280px;margin:0 auto;padding:24px 20px 64px}
+  header.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:8px}
+  .title h1{margin:0;font-size:26px;letter-spacing:-.3px}
+  .title .sub{color:var(--muted);font-size:13.5px;margin-top:4px}
+  .title .sub b{color:var(--txt);font-weight:600}
+  .live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 0 rgba(6,214,160,.6);animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(6,214,160,.55)}70%{box-shadow:0 0 0 8px rgba(6,214,160,0)}100%{box-shadow:0 0 0 0 rgba(6,214,160,0)}}
+
+  .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:18px 0 22px}
+  .seg{display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .seg button{appearance:none;background:transparent;color:var(--muted);border:0;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
+  .seg button:hover{color:var(--txt)}
+  .seg button.active{background:var(--accent);color:#06222c}
+  .spacer{flex:1}
+  .refresh{background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:8px 12px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600}
+  .refresh:hover{color:var(--txt)}
+
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:22px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 16px 14px;box-shadow:var(--shadow)}
+  .kpi .lbl{color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.6px}
+  .kpi .val{font-size:28px;font-weight:700;margin-top:6px;letter-spacing:-.5px}
+  .kpi .meta{color:var(--muted);font-size:12px;margin-top:2px}
+  .kpi .val small{font-size:14px;font-weight:600;color:var(--muted)}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px 18px;box-shadow:var(--shadow);min-width:0}
+  .card.span2{grid-column:1/-1}
+  .card h2{margin:0 0 2px;font-size:15px}
+  .card .hint{color:var(--muted);font-size:12px;margin:0 0 12px}
+  .chartbox{position:relative;height:300px}
+  .chartbox.tall{height:340px}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;background:var(--panel)}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  .tablewrap{max-height:520px;overflow:auto;border-radius:10px}
+  .sp{display:flex;align-items:center;gap:10px}
+  .sp img{width:34px;height:34px;border-radius:8px;object-fit:cover;background:var(--panel2);flex:none}
+  .sp .nm{display:flex;flex-direction:column;line-height:1.25}
+  .sp .nm .sci{color:var(--muted);font-style:italic;font-size:11.5px}
+  .rank{color:var(--muted);font-variant-numeric:tabular-nums;width:28px}
+  .bar{position:relative;height:8px;border-radius:4px;background:var(--panel2);overflow:hidden;min-width:80px}
+  .bar > span{position:absolute;inset:0 auto 0 0;border-radius:4px}
+  .pct{color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px;width:46px;display:inline-block;text-align:right}
+
+  .status{padding:40px;text-align:center;color:var(--muted)}
+  .status.err{color:var(--bad)}
+  .footnote{color:var(--muted);font-size:12px;margin-top:26px;line-height:1.6}
+  .footnote code{background:var(--panel2);padding:1px 6px;border-radius:6px;font-size:11.5px}
+  .skel{opacity:.5}
+
+  /* heatmap */
+  .hm{font-size:11px;overflow-x:auto}
+  .hm table{border-collapse:separate;border-spacing:3px;width:100%;min-width:560px;table-layout:fixed}
+  .hm th,.hm td{padding:0;border:0;white-space:nowrap}
+  .hm .corner{width:150px}
+  .hm .hlbl{color:var(--muted);font-size:10px;text-align:center;font-variant-numeric:tabular-nums}
+  .hm .slbl{color:var(--txt);text-align:right;padding-right:8px;font-size:11.5px;width:150px;overflow:hidden;text-overflow:ellipsis}
+  .hm .cell{width:100%;height:20px;border-radius:3px;background:#1b2230}
+  .hm .legend{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:11px;margin-top:10px}
+  .hm .legend .sw{width:14px;height:14px;border-radius:3px}
+
+  /* arrivals timeline */
+  .timeline{list-style:none;margin:0;padding:0;max-height:300px;overflow:auto}
+  .timeline li{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
+  .timeline li:last-child{border-bottom:0}
+  .timeline .date{color:var(--accent);font-weight:600;font-size:12px;min-width:54px;font-variant-numeric:tabular-nums}
+  .timeline .names{color:var(--txt);font-size:13px;line-height:1.4}
+  .timeline .names .n{display:inline-block;margin:0 4px 4px 0;padding:2px 8px;background:var(--panel2);border-radius:10px;font-size:12px}
+
+  /* current environment stat row */
+  .envrow{display:flex;flex-wrap:wrap;gap:18px;margin:2px 0 12px}
+  .envrow .e{display:flex;flex-direction:column}
+  .envrow .e .v{font-size:20px;font-weight:700}
+  .envrow .e .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+
+  /* detection feed */
+  .feed{list-style:none;margin:0;padding:0;max-height:560px;overflow:auto}
+  .feed li{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .feed li:last-child{border-bottom:0}
+  .feed img{width:44px;height:44px;border-radius:9px;object-fit:cover;background:var(--panel2);flex:none}
+  .feed .swatch{width:44px;height:44px;border-radius:9px;flex:none}
+  .feed .info{min-width:0;flex:1}
+  .feed .info .nm{font-weight:600;font-size:13.5px}
+  .feed .info .mt{color:var(--muted);font-size:11.5px;margin-top:1px}
+  .feed .conf{font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted);text-align:right;min-width:54px}
+  .feed audio{height:34px;flex:none;max-width:200px}
+  @media (max-width:560px){ .feed audio{max-width:130px} }
+
+  /* sensor history store toolbar */
+  .storebar{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .storebar .storeinfo{color:var(--muted);font-size:11.5px}
+  .storebar .spacer{flex:1}
+  .storebar .mini{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer}
+  .storebar .mini:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* sensor source toggle + widget grid */
+  .envtools{display:flex;align-items:center;gap:10px;margin:2px 0 14px;flex-wrap:wrap}
+  .srcseg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .srcseg button{background:var(--panel2);color:var(--muted);border:0;padding:5px 13px;font-size:12px;cursor:pointer}
+  .srcseg button.active{background:var(--accent);color:#04121c;font-weight:700}
+  .widgets{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px}
+  .widget{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .widget .wk{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  .widget .wv{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;margin:1px 0 4px}
+  .widget .wv small{font-size:12px;font-weight:600;color:var(--muted);margin-left:3px}
+  .widget .spark{height:40px;position:relative}
+
+  /* tabs */
+  .tabs{display:inline-flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px;margin:18px 0 4px}
+  .tabs button{appearance:none;background:transparent;color:var(--muted);border:0;padding:9px 20px;font-size:14px;font-weight:600;border-radius:8px;cursor:pointer;transition:.15s}
+  .tabs button:hover{color:var(--txt)}
+  .tabs button.active{background:var(--accent);color:#06222c}
+  .view[hidden]{display:none}
+
+  @media (max-width:880px){ .grid{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="title">
+      <h1>🐦 Bird Dashboard</h1>
+      <div class="sub" id="stationLine">Loading station…</div>
+    </div>
+    <div class="live"><span class="dot"></span><span id="liveLine">connecting…</span></div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button data-v="birds" class="active">🐦 Birds</button>
+    <button data-v="weather">🌡️ Weather</button>
+  </nav>
+
+  <div id="errBox"></div>
+
+  <section id="viewBirds" class="view">
+  <div class="controls">
+    <div class="seg" id="periodSeg">
+      <button data-p="24h">24h</button>
+      <button data-p="7d" class="active">7d</button>
+      <button data-p="30d">30d</button>
+      <button data-p="90d">90d</button>
+      <button data-p="all">All</button>
+    </div>
+    <div class="spacer"></div>
+    <button class="refresh" id="refreshBtn">↻ Refresh</button>
+  </div>
+
+  <div class="kpis" id="kpis">
+    <div class="kpi"><div class="lbl">Detections</div><div class="val" id="kDet">—</div><div class="meta" id="kDetMeta">in range</div></div>
+    <div class="kpi"><div class="lbl">Unique species</div><div class="val" id="kSpp">—</div><div class="meta" id="kSppMeta">in range</div></div>
+    <div class="kpi"><div class="lbl">Avg / day</div><div class="val" id="kAvg">—</div><div class="meta">detections per active day</div></div>
+    <div class="kpi"><div class="lbl">Busiest day</div><div class="val" id="kBusy">—</div><div class="meta" id="kBusyMeta">&nbsp;</div></div>
+    <div class="kpi"><div class="lbl">Top species</div><div class="val" id="kTop" style="font-size:18px">—</div><div class="meta" id="kTopMeta">&nbsp;</div></div>
+    <div class="kpi"><div class="lbl">Peak hour</div><div class="val" id="kPeak">—</div><div class="meta" id="kPeakMeta">most active time</div></div>
+  </div>
+
+  <div class="grid">
+    <div class="card span2">
+      <h2>Detections over time</h2>
+      <p class="hint">Daily detection volume across the selected range. The line is a 3‑day moving average.</p>
+      <div class="chartbox tall"><canvas id="cDaily"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>Cumulative unique species</h2>
+      <p class="hint">Distinct species accumulated as each new one is first detected.</p>
+      <div class="chartbox"><canvas id="cCumSpp"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>Activity by time of day</h2>
+      <p class="hint">Detections aggregated into 24 hourly buckets (station local time).</p>
+      <div class="chartbox"><canvas id="cHour"></canvas></div>
+    </div>
+
+    <div class="card span2">
+      <h2>Species over time</h2>
+      <p class="hint">Daily detections for the top 8 species; everything else grouped as “Other”.</p>
+      <div class="chartbox tall"><canvas id="cSppTime"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>Composition</h2>
+      <p class="hint">Share of total detections — top 10 species plus “Other”.</p>
+      <div class="chartbox"><canvas id="cDough"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>Relative frequency</h2>
+      <p class="hint">Top 15 species by share of all detections in range.</p>
+      <div class="chartbox tall"><canvas id="cFreq"></canvas></div>
+    </div>
+
+    <div class="card span2">
+      <h2>Activity heatmap — species × hour</h2>
+      <p class="hint">Detection intensity for the top 12 species across the 24‑hour day (station local time). Darker = more detections in that hour.</p>
+      <div class="hm" id="heatmap"><div class="status">Loading…</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Day‑of‑week pattern</h2>
+      <p class="hint">Total detections by weekday. Spikes that track weekdays/traffic can signal noise‑triggered detections rather than bird behavior.</p>
+      <div class="chartbox"><canvas id="cDow"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>Species accumulation curve</h2>
+      <p class="hint">Unique species discovered vs. cumulative detections. Flattening suggests the local avifauna is being saturated.</p>
+      <div class="chartbox"><canvas id="cAccum"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>Confidence distribution</h2>
+      <p class="hint" id="confHint">BirdNET confidence across sampled detections. Everything here already passed the station's minimum‑confidence filter.</p>
+      <div class="chartbox"><canvas id="cConf"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>Confidence vs. volume</h2>
+      <p class="hint" id="scatHint">Per species: detection count vs. mean confidence. Bottom‑right = abundant but uncertain (possible noise); top‑right = abundant and trusted.</p>
+      <div class="chartbox"><canvas id="cScatter"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>New species arrivals</h2>
+      <p class="hint">The first day each species was detected in this range — a phenology timeline.</p>
+      <ul class="timeline" id="arrivals"><li><span class="names">Loading…</span></li></ul>
+    </div>
+
+    <div class="card">
+      <h2>Bird activity vs. temperature</h2>
+      <p class="hint" id="actTempHint">Detections per hour overlaid with the onboard sensor's mean temperature &amp; humidity by hour of day.</p>
+      <div class="chartbox"><canvas id="cActTemp"></canvas></div>
+    </div>
+
+    <div class="card span2">
+      <h2>Recent detections</h2>
+      <p class="hint">The latest identifications with playable audio — listen to verify the calls yourself.</p>
+      <ul class="feed" id="feed"><li><span class="info">Loading…</span></li></ul>
+    </div>
+
+    <div class="card span2">
+      <h2>All species in range</h2>
+      <p class="hint" id="tblHint">Ranked by detection count.</p>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th class="rank">#</th><th>Species</th><th class="num">Detections</th><th class="num">Share</th><th>Last seen</th><th style="width:160px">Relative</th></tr>
+          </thead>
+          <tbody id="sppTbody">
+            <tr><td colspan="6" class="status">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  </section>
+
+  <section id="viewWeather" class="view" hidden>
+    <div class="controls">
+      <div class="seg" id="wxRangeSeg">
+        <button data-h="6">6h</button>
+        <button data-h="12">12h</button>
+        <button data-h="24" class="active">24h</button>
+        <button data-h="72">3d</button>
+        <button data-h="168">7d</button>
+        <button data-h="0">All</button>
+      </div>
+      <div class="srcseg" id="srcSeg">
+        <button data-s="history" class="active">History</button>
+        <button data-s="live">Live</button>
+      </div>
+      <div class="spacer"></div>
+      <button class="refresh" id="refreshBtn2">↻ Refresh</button>
+    </div>
+
+    <div class="widgets" id="sensorWidgets" style="margin-bottom:20px"></div>
+
+    <div class="grid" id="wxGrid"></div>
+
+    <div class="storebar">
+      <span class="storeinfo" id="storeInfo">…</span>
+      <span class="spacer"></span>
+      <button class="mini" id="btnExport">⇩ Export history</button>
+      <button class="mini" id="btnImport">⇪ Import</button>
+      <input type="file" id="fileImport" accept="application/json,.json" hidden>
+    </div>
+    <p class="hint" style="margin-top:14px">
+      Onboard PUC sensor. The device runs warm, so temperature reads above ambient — watch the trend, not the absolute.
+      <b>Live</b> = the most recent ~10h the API returns; <b>History</b> = your accumulated local record (export/import to keep it across machines).
+    </p>
+  </section>
+
+  <p class="footnote">
+    Data: <a href="https://app.birdweather.com/stations/27598" target="_blank" rel="noopener">BirdWeather station 27598</a>
+    via the public GraphQL API (<code>/graphql</code>) for time‑series, detections and onboard sensors, and the REST API (<code>/api/v1</code>) for species imagery.
+    Detections are automated BirdNET acoustic identifications and may include false positives. Confidence/scatter use a sample of the most recent detections in range.
+    The temperature reading is from the station's own device sensor and runs warmer than ambient. Times shown in the station's local zone.
+    The API only returns the most recent ~10h of sensor readings, so each load is merged into a local history (stored in your browser; export/import as JSON to keep it).
+  </p>
+</div>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ */
+/* Config                                                              */
+/* ------------------------------------------------------------------ */
+const STATION_ID = "27598";
+const API_TOKEN  = "kNQwUvdi7wN3rmri8s2F2qN6";       // station read token (REST species imagery only)
+const GQL_URL    = "https://app.birdweather.com/graphql";
+const REST_BASE  = "https://app.birdweather.com/api/v1";
+
+// period key -> { gql duration, rest period/from, label }
+const PERIODS = {
+  "24h": { dur:{count:1,  unit:"day"},  label:"last 24 hours" },
+  "7d":  { dur:{count:7,  unit:"day"},  label:"last 7 days"   },
+  "30d": { dur:{count:30, unit:"day"},  label:"last 30 days"  },
+  "90d": { dur:{count:90, unit:"day"},  label:"last 90 days"  },
+  "all": { dur:{count:3650,unit:"day"}, label:"all time"      },
+};
+
+let currentPeriod = "7d";
+const charts = {};                 // canvasId -> Chart instance
+
+/* ------------------------------------------------------------------ */
+/* Sensor history store (persisted + exportable/importable)            */
+/* ------------------------------------------------------------------ */
+// The BirdWeather API only ever returns the most recent ~1000 sensor
+// readings (~10h). To build a longer record we merge each page load's
+// readings into a local store keyed by timestamp (dedup), persist it in
+// localStorage, and allow JSON export/import. On startup we also try to
+// auto-load a sibling file so an exported history survives even if
+// localStorage is cleared.
+const STORE_KEY = "bw_sensor_" + STATION_ID;
+const DEFAULT_HISTORY_FILE = "birds-sensor-history.json";
+let sensorStore = {};              // isoTimestamp -> { temperature, humidity, ... }
+let sensorSource = "history";      // "history" (accumulated store) | "live" (API window)
+
+// All sensor metrics the device reports, with display config.
+const cToF = (c)=> c==null ? null : c*9/5+32;
+const SENSOR_FIELDS = ["temperature","humidity","barometricPressure","aqi","soundPressureLevel","eco2","voc"];
+const METRICS = [
+  { key:"temperature",        label:"Temperature", unit:"°F",  color:"#ff9f1c", fx:cToF,    dp:0 },
+  { key:"humidity",           label:"Humidity",    unit:"%",   color:"#00bbf9", fx:(v)=>v,  dp:0 },
+  { key:"barometricPressure", label:"Pressure",    unit:"hPa", color:"#06d6a0", fx:(v)=>v,  dp:0 },
+  { key:"soundPressureLevel", label:"Sound",       unit:"dB",  color:"#b388eb", fx:(v)=>v,  dp:0 },
+  { key:"aqi",                label:"Air quality", unit:"AQI", color:"#f15bb5", fx:(v)=>v,  dp:0 },
+  { key:"eco2",               label:"eCO₂",        unit:"ppm", color:"#ffd166", fx:(v)=>v,  dp:0 },
+  { key:"voc",                label:"VOC",         unit:"idx", color:"#90be6d", fx:(v)=>v,  dp:2 },
+];
+
+function loadStore(){
+  try{
+    const raw = localStorage.getItem(STORE_KEY);
+    if(raw){
+      sensorStore = JSON.parse(raw) || {};
+      // migrate legacy {t,h} entries to canonical field names
+      for(const ts in sensorStore){
+        const r = sensorStore[ts];
+        if(r && !("temperature" in r) && (("t" in r) || ("h" in r))){
+          sensorStore[ts] = { temperature: r.t==null?null:r.t, humidity: r.h==null?null:r.h };
+        }
+      }
+    }
+  }
+  catch(e){ console.warn("store load failed:", e.message); sensorStore = {}; }
+}
+function saveStore(){
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify(sensorStore)); }
+  catch(e){ console.warn("store save failed:", e.message); }
+}
+// Merge readings field-by-field (so a temp/humidity-only import won't clobber
+// other metrics already on record). Accepts canonical fields or legacy t/h.
+function mergeSensorNodes(nodes){
+  let added = 0;
+  for(const r of (nodes||[])){
+    const ts = r && (r.timestamp || r.ts);
+    if(!ts) continue;
+    const rec = sensorStore[ts] || {};
+    if(r.t!=null && rec.temperature==null) rec.temperature = r.t;
+    if(r.h!=null && rec.humidity==null)    rec.humidity    = r.h;
+    for(const f of SENSOR_FIELDS){ if(r[f]!=null) rec[f] = r[f]; }
+    if(!(ts in sensorStore)) added++;
+    sensorStore[ts] = rec;
+  }
+  return added;
+}
+// Sorted ascending array in the {timestamp, ...fields} shape renders expect.
+function storeNodes(){
+  return Object.keys(sensorStore).sort().map(ts=> Object.assign({ timestamp: ts }, sensorStore[ts]));
+}
+// The node set the widgets/charts draw from, honoring the source toggle.
+function currentSensorNodes(){
+  if(sensorSource === "live"){
+    const s = charts._station && charts._station.sensors;
+    const nodes = s && s.environmentHistory && s.environmentHistory.nodes ? s.environmentHistory.nodes : [];
+    return nodes.slice().sort((a,b)=> a.timestamp<b.timestamp ? -1 : 1);
+  }
+  return storeNodes();
+}
+// Sensor nodes clipped to the Weather page's selected window (hours back from
+// the most recent reading). 0 = all.
+let wxRangeHours = 24;
+function rangedSensorNodes(){
+  const nodes = currentSensorNodes();
+  if(!wxRangeHours || nodes.length<2) return nodes;
+  const last = new Date(nodes[nodes.length-1].timestamp).getTime();
+  const cutoff = last - wxRangeHours*36e5;
+  return nodes.filter(n=> new Date(n.timestamp).getTime() >= cutoff);
+}
+function storeSpanLabel(){
+  const keys = Object.keys(sensorStore);
+  if(!keys.length) return "no stored sensor readings yet";
+  keys.sort();
+  const a = new Date(keys[0]), b = new Date(keys[keys.length-1]);
+  const hrs = (b-a)/36e5;
+  const span = hrs < 48 ? hrs.toFixed(0)+"h" : (hrs/24).toFixed(1)+" days";
+  const f = (d)=> d.toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric"});
+  return keys.length.toLocaleString()+" readings · "+span+" ("+f(a)+" → "+f(b)+")";
+}
+function updateStoreInfo(){
+  const el = $("storeInfo"); if(el) el.textContent = storeSpanLabel();
+}
+function exportHistory(){
+  const data = {
+    station: STATION_ID,
+    exportedAt: new Date().toISOString(),
+    sensor: storeNodes()
+  };
+  const blob = new Blob([JSON.stringify(data)], { type:"application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0,10);
+  a.href = url; a.download = "birds-sensor-history-"+STATION_ID+"-"+stamp+".json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 0);
+}
+function ingestHistoryJson(j){
+  const nodes = Array.isArray(j) ? j : (j.sensor || j.nodes || []);
+  return mergeSensorNodes(nodes);
+}
+function importHistoryFile(file){
+  const rd = new FileReader();
+  rd.onload = ()=>{
+    try{
+      const added = ingestHistoryJson(JSON.parse(rd.result));
+      saveStore(); updateStoreInfo();
+      if(charts._station){ renderEnv(charts._station); renderActVsTemp(charts._lastA, charts._station); }
+      $("storeInfo").textContent = "imported +"+added.toLocaleString()+" new · " + storeSpanLabel();
+    }catch(e){ alert("Import failed: "+e.message); }
+  };
+  rd.readAsText(file);
+}
+async function autoLoadDefaultHistory(){
+  try{
+    const r = await fetch(DEFAULT_HISTORY_FILE, { cache:"no-store" });
+    if(!r.ok) return 0;
+    return ingestHistoryJson(await r.json());
+  }catch(e){ return 0; }   // file:// fetch is often blocked — silently ignore
+}
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                             */
+/* ------------------------------------------------------------------ */
+const $  = (id) => document.getElementById(id);
+const fmt = (n) => (n==null ? "—" : Number(n).toLocaleString());
+const pct = (x) => (x*100).toFixed(x*100<10 ? 1 : 0) + "%";
+
+function hourLabel(h){
+  const ap = h<12 ? "a" : "p";
+  let hh = h%12; if(hh===0) hh=12;
+  return hh+ap;
+}
+function prettyDate(iso){               // "2026-06-11" -> "Jun 11"
+  const [y,m,d] = iso.split("-").map(Number);
+  const mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m-1];
+  return mon+" "+d;
+}
+function timeAgo(iso){                  // pick the smartest unit
+  if(!iso) return "—";
+  const then = new Date(iso).getTime();
+  if(isNaN(then)) return "—";
+  const s = Math.max(0, Math.round((Date.now()-then)/1000));
+  const u = [
+    [60,        "second"],
+    [60,        "minute"],
+    [24,        "hour"],
+    [7,         "day"],
+    [4.34524,   "week"],
+    [12,        "month"],
+    [Infinity,  "year"],
+  ];
+  let v = s, unit = "second";
+  for(let i=0;i<u.length;i++){
+    unit = u[i][1];
+    if(v < u[i][0]) break;
+    v = v / u[i][0];
+  }
+  v = Math.floor(v);
+  if(unit==="second" && v<5) return "just now";
+  return v+" "+unit+(v===1?"":"s")+" ago";
+}
+
+async function gql(query, variables){
+  const r = await fetch(GQL_URL, {
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ query, variables })
+  });
+  if(!r.ok) throw new Error("GraphQL HTTP "+r.status);
+  const j = await r.json();
+  if(j.errors) throw new Error("GraphQL: "+j.errors.map(e=>e.message).join("; "));
+  return j.data;
+}
+
+async function rest(path){
+  const sep = path.includes("?") ? "&" : "?";
+  const r = await fetch(REST_BASE+path+sep+"token="+encodeURIComponent(API_TOKEN));
+  if(!r.ok) throw new Error("REST HTTP "+r.status);
+  return r.json();
+}
+
+/* ------------------------------------------------------------------ */
+/* Queries                                                             */
+/* ------------------------------------------------------------------ */
+const Q_STATION = `query($id:ID!){
+  station(id:$id){
+    name state country type
+    earliestDetectionAt latestDetectionAt
+    sensors {
+      environment { temperature humidity barometricPressure aqi soundPressureLevel eco2 voc }
+      environmentHistory(last:1000){ nodes { timestamp temperature humidity barometricPressure aqi soundPressureLevel eco2 voc } }
+    }
+  }
+}`;
+
+const Q_DET = `query($p:InputDuration,$after:String){
+  detections(period:$p, stationIds:["${STATION_ID}"], first:100, after:$after){
+    totalCount
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      confidence score timestamp speciesId
+      species { commonName color }
+      soundscape { url }
+    }
+  }
+}`;
+
+const Q_SERIES = `query($p:InputDuration){
+  daily: dailyDetectionCounts(period:$p, stationIds:["${STATION_ID}"]){
+    date total
+    counts { speciesId count species { commonName color } }
+  }
+  hours: timeOfDayDetectionCounts(period:$p, stationIds:["${STATION_ID}"]){
+    speciesId
+    bins { key count }
+  }
+}`;
+
+/* ------------------------------------------------------------------ */
+/* Chart.js global theming                                             */
+/* ------------------------------------------------------------------ */
+Chart.defaults.color = "#8b98a9";
+Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+Chart.defaults.borderColor = "#2a313c";
+const GRID = { color:"#222a35", drawTicks:false };
+
+function destroy(id){ if(charts[id]){ charts[id].destroy(); delete charts[id]; } }
+
+function palette(n){
+  // distinct, readable hues
+  const base = ["#4cc9f0","#80ed99","#ffd166","#ef476f","#b388eb","#ff9f1c",
+                "#06d6a0","#f15bb5","#00bbf9","#fee440","#9b5de5","#e07a5f",
+                "#3a86ff","#8ac926","#ff6b6b","#c77dff"];
+  const out=[]; for(let i=0;i<n;i++) out.push(base[i%base.length]); return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Rendering                                                           */
+/* ------------------------------------------------------------------ */
+function setStatusError(msg){
+  $("errBox").innerHTML =
+    '<div class="card span2"><div class="status err">⚠ '+msg+'</div></div>';
+}
+function clearError(){ $("errBox").innerHTML=""; }
+
+function renderStation(s){
+  if(!s){ $("stationLine").textContent="Station 27598"; return; }
+  const loc = [s.state, s.country].filter(Boolean).join(", ");
+  const since = s.earliestDetectionAt ? new Date(s.earliestDetectionAt) : null;
+  const sinceStr = since ? since.toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}) : "—";
+  $("stationLine").innerHTML =
+    '<b>'+(s.name||"Station 27598")+'</b> · '+(loc||"—")+
+    ' · listening since '+sinceStr+
+    ' · <a href="https://app.birdweather.com/stations/'+STATION_ID+'" target="_blank" rel="noopener">view on BirdWeather ↗</a>';
+  if(s.latestDetectionAt){
+    const t = new Date(s.latestDetectionAt);
+    $("liveLine").textContent = "last detection "+t.toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+  } else {
+    $("liveLine").textContent = "no recent detections";
+  }
+}
+
+function aggregate(daily, hours){
+  // sort ascending by date
+  const days = daily.slice().sort((a,b)=> a.date<b.date ? -1 : 1);
+
+  // per-species totals across range
+  const spTotals = new Map();   // speciesId -> {id,name,color,total}
+  let grandTotal = 0;
+  for(const d of days){
+    grandTotal += d.total;
+    for(const c of (d.counts||[])){
+      const cur = spTotals.get(c.speciesId) || {id:c.speciesId, name:c.species?.commonName||("#"+c.speciesId), color:c.species?.color||"#888", total:0};
+      cur.total += c.count;
+      spTotals.set(c.speciesId, cur);
+    }
+  }
+  const ranked = [...spTotals.values()].sort((a,b)=> b.total-a.total);
+
+  // cumulative unique species (first-seen by date)
+  const seen = new Set();
+  const cum = days.map(d=>{
+    for(const c of (d.counts||[])) seen.add(c.speciesId);
+    return seen.size;
+  });
+
+  // hourly buckets (keys are half-hours like 5.0/5.5 -> floor to hour)
+  const hourly = new Array(24).fill(0);
+  const byHourSpecies = new Map();   // speciesId -> hourly[24]
+  for(const row of hours){
+    let arr = byHourSpecies.get(row.speciesId);
+    if(!arr){ arr = new Array(24).fill(0); byHourSpecies.set(row.speciesId, arr); }
+    for(const b of (row.bins||[])){
+      const h = Math.max(0, Math.min(23, Math.floor(b.key)));
+      hourly[h] += b.count;
+      arr[h] += b.count;
+    }
+  }
+
+  // day-of-week totals (0=Sun..6=Sat)
+  const dow = new Array(7).fill(0);
+  for(const d of days){
+    const [y,m,dd] = d.date.split("-").map(Number);
+    const wd = new Date(y, m-1, dd).getDay();
+    dow[wd] += d.total;
+  }
+
+  // first-seen arrivals: for each day, which species appeared for the first time
+  const firstSeen = new Set();
+  const arrivals = [];
+  for(const d of days){
+    const newOnes = [];
+    for(const c of (d.counts||[])){
+      if(!firstSeen.has(c.speciesId)){
+        firstSeen.add(c.speciesId);
+        newOnes.push(c.species?.commonName || ("#"+c.speciesId));
+      }
+    }
+    if(newOnes.length) arrivals.push({ date:d.date, names:newOnes });
+  }
+
+  // cumulative detections (parallel to cum species) for accumulation curve
+  let run = 0;
+  const cumDet = days.map(d=>{ run += d.total; return run; });
+
+  // busiest day
+  let busy = null;
+  for(const d of days){ if(!busy || d.total>busy.total) busy = d; }
+
+  // peak hour
+  let peakH = -1, peakV = -1;
+  hourly.forEach((v,h)=>{ if(v>peakV){ peakV=v; peakH=h; } });
+
+  const activeDays = days.filter(d=>d.total>0).length || days.length || 1;
+
+  return { days, ranked, grandTotal, cum, cumDet, hourly, byHourSpecies, dow, arrivals, busy, peakH, peakV, activeDays };
+}
+
+function renderKPIs(A){
+  $("kDet").textContent = fmt(A.grandTotal);
+  $("kDetMeta").textContent = PERIODS[currentPeriod].label;
+  $("kSpp").textContent = fmt(A.ranked.length);
+  $("kSppMeta").textContent = PERIODS[currentPeriod].label;
+  $("kAvg").textContent = fmt(Math.round(A.grandTotal / A.activeDays));
+  if(A.busy){
+    $("kBusy").innerHTML = fmt(A.busy.total)+' <small>det</small>';
+    $("kBusyMeta").textContent = prettyDate(A.busy.date);
+  }
+  if(A.ranked.length){
+    const t = A.ranked[0];
+    $("kTop").textContent = t.name;
+    $("kTopMeta").textContent = fmt(t.total)+" ("+pct(t.total/A.grandTotal)+")";
+  }
+  if(A.peakH>=0 && A.peakV>0){
+    $("kPeak").textContent = hourLabel(A.peakH).replace("a"," AM").replace("p"," PM");
+    $("kPeakMeta").textContent = fmt(A.peakV)+" detections";
+  } else {
+    $("kPeak").textContent = "—";
+  }
+}
+
+function renderDaily(A){
+  destroy("cDaily");
+  const labels = A.days.map(d=>prettyDate(d.date));
+  const vals   = A.days.map(d=>d.total);
+  // 3-day moving average
+  const ma = vals.map((_,i)=>{
+    const a = Math.max(0,i-2);
+    const slice = vals.slice(a,i+1);
+    return Math.round(slice.reduce((s,x)=>s+x,0)/slice.length);
+  });
+  charts.cDaily = new Chart($("cDaily"), {
+    data:{
+      labels,
+      datasets:[
+        { type:"bar", label:"Detections", data:vals, backgroundColor:"rgba(76,201,240,.55)",
+          borderColor:"#4cc9f0", borderWidth:1, borderRadius:4, order:2 },
+        { type:"line", label:"3‑day avg", data:ma, borderColor:"#ffd166", borderWidth:2,
+          pointRadius:0, tension:.35, order:1 }
+      ]
+    },
+    options: baseOpts({ stacked:false })
+  });
+}
+
+function renderCumSpp(A){
+  destroy("cCumSpp");
+  charts.cCumSpp = new Chart($("cCumSpp"), {
+    type:"line",
+    data:{
+      labels:A.days.map(d=>prettyDate(d.date)),
+      datasets:[{ label:"Unique species", data:A.cum, borderColor:"#80ed99",
+        backgroundColor:"rgba(128,237,153,.15)", fill:true, stepped:true, pointRadius:0 }]
+    },
+    options: baseOpts({ legend:false })
+  });
+}
+
+function renderHour(A){
+  destroy("cHour");
+  charts.cHour = new Chart($("cHour"), {
+    type:"bar",
+    data:{
+      labels:[...Array(24).keys()].map(hourLabel),
+      datasets:[{ label:"Detections", data:A.hourly, backgroundColor:"#b388eb", borderRadius:3 }]
+    },
+    options: baseOpts({ legend:false })
+  });
+}
+
+function renderSppTime(A){
+  destroy("cSppTime");
+  const TOP = 8;
+  const top = A.ranked.slice(0,TOP);
+  const topIds = new Set(top.map(s=>s.id));
+  const colors = top.map((s,i)=> s.color || palette(TOP)[i]);
+  const labels = A.days.map(d=>prettyDate(d.date));
+
+  const datasets = top.map((s,i)=>({
+    label:s.name,
+    data:A.days.map(d=>{
+      const c = (d.counts||[]).find(x=>x.speciesId===s.id);
+      return c? c.count : 0;
+    }),
+    backgroundColor: hexA(colors[i],.85),
+    borderColor: colors[i], borderWidth:0, stack:"s"
+  }));
+  // other
+  datasets.push({
+    label:"Other",
+    data:A.days.map(d=> (d.counts||[]).reduce((sum,c)=> sum + (topIds.has(c.speciesId)?0:c.count),0)),
+    backgroundColor:"rgba(139,152,169,.4)", stack:"s"
+  });
+
+  charts.cSppTime = new Chart($("cSppTime"), {
+    type:"bar",
+    data:{ labels, datasets },
+    options: baseOpts({ stacked:true, legend:true })
+  });
+}
+
+function renderDough(A){
+  destroy("cDough");
+  const TOP=10;
+  const top = A.ranked.slice(0,TOP);
+  const otherTotal = A.ranked.slice(TOP).reduce((s,x)=>s+x.total,0);
+  const labels = top.map(s=>s.name).concat(otherTotal>0?["Other"]:[]);
+  const data   = top.map(s=>s.total).concat(otherTotal>0?[otherTotal]:[]);
+  const colors = top.map((s,i)=> s.color || palette(TOP)[i]).concat(otherTotal>0?["#3a414d"]:[]);
+  charts.cDough = new Chart($("cDough"), {
+    type:"doughnut",
+    data:{ labels, datasets:[{ data, backgroundColor:colors, borderColor:"#161b22", borderWidth:2 }] },
+    options:{
+      responsive:true, maintainAspectRatio:false, cutout:"58%",
+      plugins:{
+        legend:{ position:"right", labels:{ boxWidth:12, padding:8, font:{size:11} } },
+        tooltip:{ callbacks:{ label:(c)=> c.label+": "+fmt(c.parsed)+" ("+pct(c.parsed/A.grandTotal)+")" } }
+      }
+    }
+  });
+}
+
+function renderFreq(A){
+  destroy("cFreq");
+  const TOP=15;
+  const top = A.ranked.slice(0,TOP);
+  charts.cFreq = new Chart($("cFreq"), {
+    type:"bar",
+    data:{
+      labels: top.map(s=>s.name),
+      datasets:[{
+        label:"Share",
+        data: top.map(s=> +(s.total/A.grandTotal*100).toFixed(2)),
+        backgroundColor: top.map((s,i)=> s.color || palette(TOP)[i]),
+        borderRadius:3
+      }]
+    },
+    options:{
+      indexAxis:"y", responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{ callbacks:{ label:(c)=>{
+          const sp = top[c.dataIndex];
+          return fmt(sp.total)+" detections ("+c.parsed.x.toFixed(1)+"%)";
+        }}}
+      },
+      scales:{
+        x:{ grid:GRID, ticks:{ callback:(v)=>v+"%" } },
+        y:{ grid:{display:false}, ticks:{ font:{size:11.5} } }
+      }
+    }
+  });
+}
+
+function renderTable(A, images){
+  const tb = $("sppTbody");
+  $("tblHint").textContent = A.ranked.length+" species detected — ranked by count ("+PERIODS[currentPeriod].label+").";
+  if(!A.ranked.length){ tb.innerHTML='<tr><td colspan="6" class="status">No detections in this range.</td></tr>'; return; }
+  const max = A.ranked[0].total;
+  tb.innerHTML = A.ranked.map((s,i)=>{
+    const img = images[s.id];
+    const thumb = img && img.thumbnailUrl
+      ? '<img src="'+img.thumbnailUrl+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+      : '<span style="width:34px;height:34px;border-radius:8px;background:'+(s.color||"#333")+';flex:none;display:inline-block"></span>';
+    const sci = img && img.scientificName ? '<span class="sci">'+img.scientificName+'</span>' : '';
+    const share = s.total/A.grandTotal;
+    const lastIso = (img && img.latestDetectionAt) || null;
+    const seen = timeAgo(lastIso);
+    const seenTitle = lastIso ? new Date(lastIso).toLocaleString() : "";
+    return '<tr>'+
+      '<td class="rank">'+(i+1)+'</td>'+
+      '<td><div class="sp">'+thumb+'<div class="nm"><span>'+s.name+'</span>'+sci+'</div></div></td>'+
+      '<td class="num">'+fmt(s.total)+'</td>'+
+      '<td class="num"><span class="pct">'+pct(share)+'</span></td>'+
+      '<td style="color:var(--muted)" title="'+seenTitle+'">'+seen+'</td>'+
+      '<td><div class="bar"><span style="width:'+(s.total/max*100)+'%;background:'+(s.color||"#4cc9f0")+'"></span></div></td>'+
+    '</tr>';
+  }).join("");
+}
+
+/* shared chart options */
+function baseOpts({stacked=false, legend=false}={}){
+  return {
+    responsive:true, maintainAspectRatio:false,
+    interaction:{ mode:"index", intersect:false },
+    plugins:{
+      legend: legend ? { position:"top", labels:{ boxWidth:12, padding:10, font:{size:11} } } : { display:false },
+      tooltip:{ callbacks:{ label:(c)=> (c.dataset.label? c.dataset.label+": ":"") + fmt(c.parsed.y) } }
+    },
+    scales:{
+      x:{ stacked, grid:{display:false}, ticks:{ maxRotation:0, autoSkip:true, maxTicksLimit:14 } },
+      y:{ stacked, grid:GRID, beginAtZero:true, ticks:{ precision:0 } }
+    }
+  };
+}
+
+function hexA(hex,a){
+  if(!/^#([0-9a-f]{6})$/i.test(hex)) return hex;
+  const n=parseInt(hex.slice(1),16);
+  return "rgba("+(n>>16&255)+","+(n>>8&255)+","+(n&255)+","+a+")";
+}
+
+/* ------------------------------------------------------------------ */
+/* New visualizations                                                  */
+/* ------------------------------------------------------------------ */
+
+// #1 Species × hour heatmap (custom CSS grid)
+function renderHeatmap(A){
+  const el = $("heatmap");
+  const top = A.ranked.slice(0,12);
+  if(!top.length){ el.innerHTML='<div class="status">No data.</div>'; return; }
+  // global max per-cell for color scaling
+  let cmax = 1;
+  for(const s of top){
+    const arr = A.byHourSpecies.get(s.id) || [];
+    for(const v of arr) if(v>cmax) cmax=v;
+  }
+  const cell = (v)=>{
+    const t = v<=0 ? 0 : Math.pow(v/cmax, 0.55);   // gamma for visibility
+    const col = v<=0 ? "#1b2230" : hexA("#4cc9f0", 0.12 + 0.88*t);
+    return '<td><div class="cell" style="background:'+col+'" title="'+v+'"></div></td>';
+  };
+  let html = '<table><thead><tr><th class="corner"></th>';
+  for(let h=0;h<24;h++) html += '<th class="hlbl">'+(h%3===0?hourLabel(h):"")+'</th>';
+  html += '</tr></thead><tbody>';
+  for(const s of top){
+    const arr = A.byHourSpecies.get(s.id) || new Array(24).fill(0);
+    html += '<tr><td class="slbl" title="'+s.name+'">'+s.name+'</td>';
+    for(let h=0;h<24;h++) html += cell(arr[h]||0);
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  html += '<div class="legend"><span>less</span>'+
+          '<span class="sw" style="background:'+hexA("#4cc9f0",.18)+'"></span>'+
+          '<span class="sw" style="background:'+hexA("#4cc9f0",.5)+'"></span>'+
+          '<span class="sw" style="background:'+hexA("#4cc9f0",1)+'"></span>'+
+          '<span>more</span></div>';
+  el.innerHTML = html;
+}
+
+// #2 Day of week
+function renderDow(A){
+  destroy("cDow");
+  const names = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  charts.cDow = new Chart($("cDow"), {
+    type:"bar",
+    data:{ labels:names, datasets:[{ label:"Detections", data:A.dow, backgroundColor:"#06d6a0", borderRadius:3 }] },
+    options: baseOpts({ legend:false })
+  });
+}
+
+// #8 Accumulation curve (species vs cumulative detections)
+function renderAccum(A){
+  destroy("cAccum");
+  const pts = A.days.map((d,i)=>({ x:A.cumDet[i], y:A.cum[i] }));
+  charts.cAccum = new Chart($("cAccum"), {
+    type:"line",
+    data:{ datasets:[{ label:"Species", data:pts, borderColor:"#ffd166",
+      backgroundColor:"rgba(255,209,102,.12)", fill:true, tension:.25, pointRadius:2 }] },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{
+        label:(c)=> c.parsed.y+" species @ "+fmt(c.parsed.x)+" detections" } } },
+      scales:{
+        x:{ type:"linear", grid:GRID, title:{display:true,text:"cumulative detections",color:"#8b98a9",font:{size:11}}, ticks:{ callback:(v)=>fmt(v) } },
+        y:{ grid:GRID, beginAtZero:true, title:{display:true,text:"unique species",color:"#8b98a9",font:{size:11}}, ticks:{precision:0} }
+      }
+    }
+  });
+}
+
+// #4 Confidence distribution + #5 scatter + #6 feed — all from detection sample
+function renderConfidence(sample){
+  destroy("cConf");
+  $("confHint").textContent = "BirdNET confidence across "+fmt(sample.length)+
+    " sampled detections. All passed the station's minimum‑confidence filter.";
+  if(!sample.length){ return; }
+  // histogram of confidence in 0.025 buckets across observed range
+  const confs = sample.map(d=>d.confidence).filter(x=>x!=null);
+  const lo = Math.min(...confs), hi = Math.max(...confs);
+  const step = 0.025;
+  const start = Math.floor(lo/step)*step;
+  const nb = Math.max(1, Math.ceil((hi-start)/step));
+  const bins = new Array(nb).fill(0);
+  for(const c of confs){
+    let i = Math.floor((c-start)/step);
+    if(i<0) i=0; if(i>=nb) i=nb-1;
+    bins[i]++;
+  }
+  const labels = bins.map((_,i)=> (Math.round((start+i*step)*100))+"%");
+  charts.cConf = new Chart($("cConf"), {
+    type:"bar",
+    data:{ labels, datasets:[{ label:"Detections", data:bins, backgroundColor:"#f15bb5", borderRadius:3 }] },
+    options: baseOpts({ legend:false })
+  });
+}
+
+function renderScatter(sample, A){
+  destroy("cScatter");
+  if(!sample.length){ return; }
+  // per-species mean confidence + count from sample
+  const m = new Map(); // id -> {sum,n,name,color}
+  for(const d of sample){
+    const id = String(d.speciesId);
+    const cur = m.get(id) || {sum:0,n:0,name:d.species?.commonName||("#"+id), color:d.species?.color||"#4cc9f0"};
+    cur.sum += d.confidence; cur.n++;
+    m.set(id, cur);
+  }
+  // join to full-range totals where available
+  const totalById = new Map(A.ranked.map(s=>[String(s.id), s.total]));
+  const pts = [...m.entries()].map(([id,v])=>({
+    x: totalById.get(id) || v.n,
+    y: +(v.sum/v.n).toFixed(4),
+    r: Math.max(3, Math.min(16, Math.sqrt(v.n))),
+    name: v.name, color: v.color, n: v.n
+  }));
+  charts.cScatter = new Chart($("cScatter"), {
+    type:"bubble",
+    data:{ datasets:[{ data:pts, backgroundColor:pts.map(p=>hexA(p.color,.55)), borderColor:pts.map(p=>p.color), borderWidth:1 }] },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{
+        label:(c)=>{ const p=c.raw; return p.name+": "+fmt(p.x)+" det, mean conf "+(p.y*100).toFixed(1)+"% (n="+p.n+")"; } } } },
+      scales:{
+        x:{ type:"logarithmic", grid:GRID, title:{display:true,text:"detections in range (log)",color:"#8b98a9",font:{size:11}} },
+        y:{ grid:GRID, title:{display:true,text:"mean confidence",color:"#8b98a9",font:{size:11}}, ticks:{ callback:(v)=>(v*100).toFixed(0)+"%" } }
+      }
+    }
+  });
+}
+
+function renderFeed(sample, images){
+  const el = $("feed");
+  if(!sample.length){ el.innerHTML='<li><span class="info">No recent detections.</span></li>'; return; }
+  const items = sample.slice(0,24);
+  el.innerHTML = items.map(d=>{
+    const img = images[String(d.speciesId)];
+    const thumb = img && img.thumbnailUrl
+      ? '<img src="'+img.thumbnailUrl+'" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+      : '<span class="swatch" style="background:'+(d.species?.color||"#333")+'"></span>';
+    const t = new Date(d.timestamp);
+    const when = t.toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+    const audio = d.soundscape && d.soundscape.url
+      ? '<audio controls preload="none" src="'+d.soundscape.url+'"></audio>' : '';
+    return '<li>'+thumb+
+      '<div class="info"><div class="nm">'+(d.species?.commonName||"Unknown")+'</div>'+
+      '<div class="mt">'+when+' · '+timeAgo(d.timestamp)+'</div></div>'+
+      audio+
+      '<div class="conf">'+(d.confidence!=null?(d.confidence*100).toFixed(0)+"%":"")+'</div>'+
+    '</li>';
+  }).join("");
+}
+
+// #7 Environment — a small dashboard widget (current value + sparkline) per sensor
+function renderEnv(station){
+  const wrap = $("sensorWidgets"); if(!wrap) return;
+  const latest = currentSensorNodes();          // for the current value (always newest)
+  const nodes = rangedSensorNodes();            // for the sparkline window
+  if(wrap.dataset.built !== "1"){
+    wrap.innerHTML = METRICS.map(m=>
+      '<div class="widget"><div class="wk">'+m.label+'</div>'+
+      '<div class="wv" id="wv_'+m.key+'">—</div>'+
+      '<div class="spark"><canvas id="spark_'+m.key+'"></canvas></div></div>'
+    ).join("");
+    wrap.dataset.built = "1";
+  }
+  const labels = nodes.map(n=> n.timestamp);
+  for(const m of METRICS){
+    const series = nodes.map(n=> n[m.key]!=null ? m.fx(n[m.key]) : null);
+    let cur = null;
+    for(let i=latest.length-1;i>=0;i--){ if(latest[i][m.key]!=null){ cur=m.fx(latest[i][m.key]); break; } }
+    $("wv_"+m.key).innerHTML = (cur==null ? "—" : Number(cur).toFixed(m.dp)) + (m.unit ? '<small>'+m.unit+'</small>' : "");
+    destroy("spark_"+m.key);
+    charts["spark_"+m.key] = new Chart($("spark_"+m.key), {
+      type:"line",
+      data:{ labels, datasets:[{ data:series, borderColor:m.color, backgroundColor:hexA(m.color,.13), borderWidth:1.5, pointRadius:0, tension:.3, fill:true, spanGaps:true }] },
+      options:{
+        responsive:true, maintainAspectRatio:false, animation:false,
+        plugins:{ legend:{display:false}, tooltip:{enabled:false} },
+        scales:{ x:{display:false}, y:{display:false} }
+      }
+    });
+  }
+}
+
+// Full-size per-sensor charts for the Weather tab, over the selected range.
+function renderWeatherCharts(){
+  const grid = $("wxGrid"); if(!grid) return;
+  const nodes = rangedSensorNodes();
+  if(grid.dataset.built !== "1"){
+    grid.innerHTML = METRICS.map(m=>
+      '<div class="card span2"><h2>'+m.label+' <small style="color:var(--muted);font-weight:600">'+m.unit+'</small></h2>'+
+      '<div class="chartbox tall"><canvas id="wx_'+m.key+'"></canvas></div></div>'
+    ).join("");
+    grid.dataset.built = "1";
+  }
+  const multiDay = nodes.length>1 && (new Date(nodes[nodes.length-1].timestamp)-new Date(nodes[0].timestamp))>36e5*24;
+  const labels = nodes.map(n=> new Date(n.timestamp).toLocaleString(undefined,
+    multiDay ? {month:"numeric",day:"numeric",hour:"numeric"} : {hour:"numeric",minute:"2-digit"}));
+  for(const m of METRICS){
+    const data = nodes.map(n=> n[m.key]!=null ? m.fx(n[m.key]) : null);
+    destroy("wx_"+m.key);
+    charts["wx_"+m.key] = new Chart($("wx_"+m.key), {
+      type:"line",
+      data:{ labels, datasets:[{ label:m.label, data, borderColor:m.color, backgroundColor:hexA(m.color,.10), borderWidth:2, pointRadius:0, tension:.3, fill:true, spanGaps:true }] },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        interaction:{ mode:"index", intersect:false },
+        plugins:{ legend:{display:false} },
+        scales:{
+          x:{ grid:{display:false}, ticks:{ maxTicksLimit:8, maxRotation:0 } },
+          y:{ grid:GRID, title:{display:true,text:m.unit,color:m.color,font:{size:10}} }
+        }
+      }
+    });
+  }
+}
+
+// Mean onboard temperature/humidity by hour-of-day (station local).
+// Parses the hour straight from the station-local ISO timestamp so it
+// lines up with the detection hour buckets in A.hourly.
+function envByHour(nodes){
+  const tSum=new Array(24).fill(0), tN=new Array(24).fill(0);
+  const hSum=new Array(24).fill(0), hN=new Array(24).fill(0);
+  for(const r of (nodes||[])){
+    const m=/T(\d{2})/.exec(r.timestamp||""); if(!m) continue;
+    const h=+m[1]; if(h<0||h>23) continue;
+    if(r.temperature!=null){ tSum[h]+=r.temperature; tN[h]++; }
+    if(r.humidity!=null){ hSum[h]+=r.humidity; hN[h]++; }
+  }
+  return {
+    temp: tN.map((c,h)=> c? tSum[h]/c : null),
+    hum:  hN.map((c,h)=> c? hSum[h]/c : null),
+    covered: tN.filter(c=>c>0).length
+  };
+}
+
+// Detections per hour vs. onboard temperature/humidity by hour of day
+function renderActVsTemp(A, station){
+  destroy("cActTemp");
+  // Bin from the selected sensor source so coverage grows toward all 24 hours.
+  const eb = envByHour(currentSensorNodes());
+  const labels = Array.from({length:24},(_,h)=>hourLabel(h));
+  charts.cActTemp = new Chart($("cActTemp"), {
+    data:{ labels, datasets:[
+      { type:"bar", label:"Detections", data:A.hourly, backgroundColor:hexA("#b388eb",.5), yAxisID:"y", borderRadius:3, order:3 },
+      { type:"line", label:"Temp °F", data:eb.temp.map(cToF), borderColor:"#ff9f1c", yAxisID:"y1", pointRadius:0, tension:.3, borderWidth:2, spanGaps:false, order:1 },
+      { type:"line", label:"Humidity %", data:eb.hum, borderColor:"#00bbf9", yAxisID:"y2", pointRadius:0, tension:.3, borderWidth:2, spanGaps:false, order:2 }
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      interaction:{ mode:"index", intersect:false },
+      plugins:{ legend:{ position:"top", labels:{ boxWidth:12, font:{size:11} } } },
+      scales:{
+        x:{ grid:{display:false}, ticks:{ maxTicksLimit:8, maxRotation:0 } },
+        y:{ position:"left", grid:GRID, title:{display:true,text:"detections",color:"#b388eb",font:{size:10}} },
+        y1:{ position:"right", grid:{display:false}, title:{display:true,text:"°F",color:"#ff9f1c",font:{size:10}} },
+        y2:{ display:false, min:0, max:100 }
+      }
+    }
+  });
+  const hint = $("actTempHint");
+  if(hint){
+    hint.textContent = eb.covered>=24
+      ? "Detections per hour (full range) overlaid with the onboard sensor's mean temperature & humidity by hour of day, built from the accumulated local history. Both activity and temperature track the daily cycle — the dawn surge happens while it's still cool, so this mostly reflects light/time-of-day, not a direct temperature response."
+      : "Detections per hour (full range) overlaid with the onboard sensor's mean temperature & humidity. The accumulated history currently covers ~"+eb.covered+" of 24 hours — reload across the day (or import an exported history) to fill the rest.";
+  }
+}
+
+// #3 New species arrivals timeline
+function renderArrivals(A){
+  const el = $("arrivals");
+  if(!A.arrivals.length){ el.innerHTML='<li><span class="names">No data.</span></li>'; return; }
+  const rows = A.arrivals.slice().reverse();   // newest first
+  el.innerHTML = rows.map(r=>
+    '<li><span class="date">'+prettyDate(r.date)+'</span>'+
+    '<span class="names">'+r.names.map(n=>'<span class="n">'+n+'</span>').join("")+'</span></li>'
+  ).join("");
+}
+
+/* ------------------------------------------------------------------ */
+/* Image enrichment (REST) — non-critical                              */
+/* ------------------------------------------------------------------ */
+async function fetchImages(){
+  try{
+    const j = await rest("/stations/"+API_TOKEN+"/species?period=all&limit=100");
+    const map = {};
+    for(const s of (j.species||[])){
+      map[String(s.id)] = { thumbnailUrl:s.thumbnailUrl, scientificName:s.scientificName, latestDetectionAt:s.latestDetectionAt };
+    }
+    return map;
+  }catch(e){ console.warn("image enrichment failed:", e.message); return {}; }
+}
+
+// Cursor-paged detection sample (recent N within period) for confidence/scatter/feed
+async function fetchDetectionSample(dur, max=600){
+  let nodes=[], cursor=null, pages=0;
+  try{
+    while(nodes.length<max && pages<8){
+      const data = await gql(Q_DET, { p:dur, after:cursor });
+      const c = data.detections;
+      nodes = nodes.concat(c.nodes||[]);
+      if(!c.pageInfo || !c.pageInfo.hasNextPage) break;
+      cursor = c.pageInfo.endCursor; pages++;
+    }
+  }catch(e){ console.warn("detection sample failed:", e.message); }
+  return nodes.slice(0,max);
+}
+
+/* ------------------------------------------------------------------ */
+/* Load                                                                */
+/* ------------------------------------------------------------------ */
+let imageCache = null;
+
+async function load(){
+  clearError();
+  $("liveLine").textContent = "loading…";
+  const p = PERIODS[currentPeriod];
+  try{
+    const [series, station, images, sample] = await Promise.all([
+      gql(Q_SERIES, { p: p.dur }),
+      gql(Q_STATION, { id: STATION_ID }),
+      imageCache ? Promise.resolve(imageCache) : fetchImages(),
+      fetchDetectionSample(p.dur, 600)
+    ]);
+    if(images) imageCache = images;
+    if(station){ charts._station = station.station; renderStation(charts._station); }
+
+    // Accumulate this load's sensor readings into the persistent store.
+    if(charts._station && charts._station.sensors && charts._station.sensors.environmentHistory){
+      mergeSensorNodes(charts._station.sensors.environmentHistory.nodes);
+      saveStore();
+      updateStoreInfo();
+    }
+
+    const A = aggregate(series.daily||[], series.hours||[]);
+    charts._lastA = A;
+    renderKPIs(A);
+    renderDaily(A);
+    renderCumSpp(A);
+    renderHour(A);
+    renderSppTime(A);
+    renderDough(A);
+    renderFreq(A);
+    renderTable(A, imageCache||{});
+
+    // new visualizations
+    renderHeatmap(A);
+    renderDow(A);
+    renderAccum(A);
+    renderArrivals(A);
+    renderConfidence(sample);
+    renderScatter(sample, A);
+    renderFeed(sample, imageCache||{});
+    renderEnv(charts._station);
+    renderActVsTemp(A, charts._station);
+    renderWeatherCharts();
+
+    // refresh live line from cached station after period changes
+    if(charts._station && charts._station.latestDetectionAt){
+      const t = new Date(charts._station.latestDetectionAt);
+      $("liveLine").textContent = "last detection "+t.toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+    }
+  }catch(e){
+    console.error(e);
+    setStatusError("Failed to load data — "+e.message);
+    $("liveLine").textContent = "error";
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Wire up                                                             */
+/* ------------------------------------------------------------------ */
+$("periodSeg").addEventListener("click",(e)=>{
+  const btn = e.target.closest("button[data-p]"); if(!btn) return;
+  [...$("periodSeg").children].forEach(b=>b.classList.toggle("active", b===btn));
+  currentPeriod = btn.dataset.p;
+  load();
+});
+$("refreshBtn").addEventListener("click", load);
+
+$("btnExport").addEventListener("click", exportHistory);
+$("btnImport").addEventListener("click", ()=> $("fileImport").click());
+$("fileImport").addEventListener("change",(e)=>{
+  const f = e.target.files && e.target.files[0];
+  if(f) importHistoryFile(f);
+  e.target.value = "";   // allow re-importing the same file
+});
+
+$("srcSeg").addEventListener("click",(e)=>{
+  const b = e.target.closest("button[data-s]"); if(!b) return;
+  [...$("srcSeg").children].forEach(x=>x.classList.toggle("active", x===b));
+  sensorSource = b.dataset.s;
+  renderEnv(charts._station);
+  renderWeatherCharts();
+  renderActVsTemp(charts._lastA, charts._station);
+});
+
+$("refreshBtn2").addEventListener("click", load);
+
+$("wxRangeSeg").addEventListener("click",(e)=>{
+  const b = e.target.closest("button[data-h]"); if(!b) return;
+  [...$("wxRangeSeg").children].forEach(x=>x.classList.toggle("active", x===b));
+  wxRangeHours = +b.dataset.h;
+  renderEnv(charts._station);
+  renderWeatherCharts();
+});
+
+// Tab switching
+$("tabs").addEventListener("click",(e)=>{
+  const b = e.target.closest("button[data-v]"); if(!b) return;
+  [...$("tabs").children].forEach(x=>x.classList.toggle("active", x===b));
+  $("viewBirds").hidden   = b.dataset.v !== "birds";
+  $("viewWeather").hidden = b.dataset.v !== "weather";
+  // Chart.js needs a re-render once its container becomes visible.
+  if(b.dataset.v === "weather"){ renderEnv(charts._station); renderWeatherCharts(); }
+});
+
+// Restore persisted sensor history, then merge any sibling export file,
+// then kick off the live load.
+loadStore();
+updateStoreInfo();
+autoLoadDefaultHistory().then((added)=>{
+  if(added){ saveStore(); updateStoreInfo(); }
+  load();
+});
+
+</script>
+</body>
+</html>
