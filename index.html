@@ -232,8 +232,12 @@
   .tl-col .dot img{width:100%;height:100%;object-fit:cover;display:block}
   .tl-col .dot .ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:12px;color:#d9e2ef;font-weight:700}
   .tl-col .cnt{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;font-size:10.5px;color:#c9d4e3;background:#1a2432;border:1px solid #2f3d52;padding:0 6px;border-radius:999px;line-height:17px;height:17px;pointer-events:none}
-  .tl-gap{position:absolute;top:14px;bottom:38px;width:14px;transform:translateX(-50%);background:repeating-linear-gradient(135deg,rgba(255,255,255,.25),rgba(255,255,255,.25) 2px,transparent 2px,transparent 6px);opacity:.45;border-radius:3px}
+  .tl-gap{position:absolute;top:14px;bottom:38px;width:18px;transform:translateX(-50%);background:linear-gradient(180deg,#111927 0,#182334 100%);opacity:.95;box-shadow:inset 0 0 0 1px #2a3649}
+  .tl-gap::before,.tl-gap::after{content:"";position:absolute;top:0;bottom:0;width:8px;background-size:8px 12px;background-repeat:repeat-y}
+  .tl-gap::before{left:-8px;background-image:linear-gradient(-45deg,transparent 0 50%,#182334 50% 100%)}
+  .tl-gap::after{right:-8px;background-image:linear-gradient(45deg,transparent 0 50%,#182334 50% 100%)}
   .tl-gaplbl{position:absolute;top:4px;left:50%;transform:translateX(-50%);font-size:10.5px;color:var(--muted);background:#151d2a;padding:1px 6px;border-radius:999px;border:1px solid #2d3a4d;white-space:nowrap}
+  .tl-tip{position:fixed;z-index:10000;pointer-events:none;background:#0f1623;color:#d9e3f2;border:1px solid #2f3d52;border-radius:8px;padding:6px 8px;box-shadow:0 8px 24px rgba(0,0,0,.35);font-size:12px;line-height:1.25;max-width:280px;display:none;white-space:normal}
   .tlhelp{color:var(--muted);font-size:12px;margin-top:8px}
   @media (max-width:560px){ .timelineinner{height:220px} .tlhelp{font-size:11px} }
 
@@ -894,6 +898,39 @@ function prettyDate(iso){               // "2026-06-11" -> "Jun 11"
   const mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m-1];
   return mon+" "+d;
 }
+function escAttr(s){
+  return String(s==null ? "" : s)
+    .replace(/&/g,"&amp;")
+    .replace(/"/g,"&quot;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
+}
+function timelineTipEl(){
+  let el = document.getElementById("tlTip");
+  if(el) return el;
+  el = document.createElement("div");
+  el.id = "tlTip";
+  el.className = "tl-tip";
+  document.body.appendChild(el);
+  return el;
+}
+function showTimelineTip(text, x, y){
+  const el = timelineTipEl();
+  el.textContent = text;
+  el.style.display = "block";
+  const pad = 12;
+  const r = el.getBoundingClientRect();
+  let lx = x + 14;
+  let ly = y + 14;
+  if(lx + r.width > window.innerWidth - pad) lx = x - r.width - 14;
+  if(ly + r.height > window.innerHeight - pad) ly = y - r.height - 14;
+  el.style.left = Math.max(pad, lx)+"px";
+  el.style.top = Math.max(pad, ly)+"px";
+}
+function hideTimelineTip(){
+  const el = document.getElementById("tlTip");
+  if(el) el.style.display = "none";
+}
 function timeAgo(iso){                  // pick the smartest unit
   if(!iso) return "—";
   const then = new Date(iso).getTime();
@@ -1336,22 +1373,29 @@ function renderDetectionTimeline(detections, images){
     html += '<div class="tl-gap" style="left:'+x+'px"></div><div class="tl-gaplbl" style="left:'+x+'px">'+lbl+'</div>';
   }
 
+  const shiftByIndex = {};
+  const gapNudgePx = 13;
+  for(const gp of gaps){
+    shiftByIndex[gp.i] = (shiftByIndex[gp.i] || 0) + gapNudgePx;
+    if(gp.i-1 >= 0) shiftByIndex[gp.i-1] = (shiftByIndex[gp.i-1] || 0) - gapNudgePx;
+  }
+
   let lastBadgeX = -1e9;
   const minBadgeDx = 34;
   for(let i=0;i<rows.length;i++){
     const r = rows[i];
-    const x = xAt(eff[i]);
+    const x = xAt(eff[i]) + (shiftByIndex[i] || 0);
     const mag = 24 + (Math.log1p(r.total)/Math.log1p(maxTotal))*128;
     const sz = 24 + Math.min(20, Math.sqrt(r.top.c)*4);
     const m = speciesMeta[r.top.id] || {};
     const img = (images && images[r.top.id] && images[r.top.id].thumbnailUrl) || m.thumb || "";
     const bw = m.bw || "";
     const sci = m.sci || "";
-    const title = r.top.name + (sci ? ' ('+sci+')' : '')+' · '+new Date(r.t).toLocaleString()+' · '+r.total+' detections';
+    const tip = r.top.name + (sci ? ' ('+sci+')' : '')+' · '+r.total+' detections · '+new Date(r.t).toLocaleString();
     const dotBottom = Math.max(8, mag - sz*0.45);
     const showCnt = r.total>1 && (x-lastBadgeX)>=minBadgeDx;
     if(showCnt) lastBadgeX = x;
-    html += '<div class="tl-col" style="left:'+x+'px" title="'+title.replace(/"/g,'&quot;')+'">'+
+    html += '<div class="tl-col" style="left:'+x+'px" data-tip="'+escAttr(tip)+'">'+
       '<span class="line" style="height:'+mag+'px"></span>'+
       (bw ? '<a class="dot" href="'+bw+'" target="_blank" rel="noopener" style="bottom:'+dotBottom+'px;width:'+sz+'px;height:'+sz+'px">' : '<span class="dot" style="bottom:'+dotBottom+'px;width:'+sz+'px;height:'+sz+'px">')+
       (img ? '<img src="'+img+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '<span class="ph">'+(r.top.name||"?").slice(0,1)+'</span>')+
@@ -1361,6 +1405,18 @@ function renderDetectionTimeline(detections, images){
   }
   html += '</div>';
   wrap.innerHTML = html;
+  wrap.querySelectorAll('.tl-col').forEach(col=>{
+    col.addEventListener('pointerenter', (ev)=>{
+      const txt = col.getAttribute('data-tip') || '';
+      if(txt) showTimelineTip(txt, ev.clientX, ev.clientY);
+    });
+    col.addEventListener('pointermove', (ev)=>{
+      const txt = col.getAttribute('data-tip') || '';
+      if(txt) showTimelineTip(txt, ev.clientX, ev.clientY);
+    });
+    col.addEventListener('pointerleave', hideTimelineTip);
+  });
+  wrap.addEventListener('scroll', hideTimelineTip, { passive:true });
   if(hint){
     hint.textContent = "Horizontally scrollable timeline across the selected range. Marker avatars show the dominant species per time bin; "+gaps.length+" long empty gaps were clipped.";
   }
