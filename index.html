@@ -428,7 +428,7 @@
     via the public GraphQL API (<code>/graphql</code>) for time‑series, detections and onboard sensors, and the REST API (<code>/api/v1</code>) for species imagery.
     Detections are automated BirdNET acoustic identifications and may include false positives. Confidence/scatter use a sample of the most recent detections in range.
     The temperature reading is from the station's own device sensor and runs warmer than ambient. Times shown in the station's local zone.
-    The API only returns the most recent ~10h of sensor readings, so each load is merged into a local history (stored in your browser; export/import as JSON to keep it).
+    The API only returns a rolling window for some data, so sensor readings and sampled detections are merged into local history and can also be loaded from exported JSON files to preserve older records.
   </p>
 </div>
 
@@ -496,8 +496,11 @@ const audioFx = {                  // shared playback settings for all feed clip
 // localStorage is cleared.
 const STORE_KEY = "bw_sensor_" + STATION_ID;
 const DEFAULT_HISTORY_FILE = "birds-sensor-history.json";
+const DET_STORE_KEY = "bw_det_" + STATION_ID;
+const DEFAULT_DETECTIONS_FILE = "birds-detections-history.json";
 let sensorStore = {};              // isoTimestamp -> { temperature, humidity, ... }
 let sensorSource = "history";      // "history" (accumulated store) | "live" (API window)
+let detectionStore = {};           // key -> detection object
 
 // All sensor metrics the device reports, with display config.
 const cToF = (c)=> c==null ? null : c*9/5+32;
@@ -710,6 +713,104 @@ async function autoLoadDefaultHistory(){
     if(!r.ok) return 0;
     return ingestHistoryJson(await r.json());
   }catch(e){ return 0; }   // file:// fetch is often blocked — silently ignore
+}
+
+function loadDetectionStore(){
+  try{ detectionStore = JSON.parse(localStorage.getItem(DET_STORE_KEY) || "{}") || {}; }
+  catch(_e){ detectionStore = {}; }
+}
+function saveDetectionStore(){
+  try{ localStorage.setItem(DET_STORE_KEY, JSON.stringify(detectionStore)); }
+  catch(e){ console.warn("detection store save failed:", e.message); }
+}
+function detectionKey(d){
+  const ts = d && d.timestamp ? d.timestamp : "";
+  const sid = d && d.speciesId!=null ? String(d.speciesId) : "";
+  const u = d && d.soundscape && d.soundscape.url ? d.soundscape.url : "";
+  return ts+"|"+sid+"|"+u;
+}
+function normalizeDetection(d){
+  if(!d || !d.timestamp || d.speciesId==null) return null;
+  return {
+    timestamp: d.timestamp,
+    speciesId: String(d.speciesId),
+    confidence: d.confidence==null ? null : d.confidence,
+    score: d.score==null ? null : d.score,
+    species: {
+      commonName: d.species && d.species.commonName ? d.species.commonName : ("#"+d.speciesId),
+      color: d.species && d.species.color ? d.species.color : "#4cc9f0"
+    },
+    soundscape: d.soundscape && d.soundscape.url ? { url:d.soundscape.url } : null
+  };
+}
+function mergeDetections(nodes){
+  let added = 0;
+  for(const raw of (nodes||[])){
+    const d = normalizeDetection(raw);
+    if(!d) continue;
+    const k = detectionKey(d);
+    if(!(k in detectionStore)) added++;
+    detectionStore[k] = d;
+  }
+  return added;
+}
+function storeDetections(){
+  return Object.values(detectionStore).sort((a,b)=> a.timestamp<b.timestamp ? -1 : 1);
+}
+function ingestDetectionHistoryJson(j){
+  const nodes = Array.isArray(j) ? j : (j.detections || j.nodes || []);
+  return mergeDetections(nodes);
+}
+async function autoLoadDefaultDetections(){
+  try{
+    const r = await fetch(DEFAULT_DETECTIONS_FILE, { cache:"no-store" });
+    if(!r.ok) return 0;
+    return ingestDetectionHistoryJson(await r.json());
+  }catch(_e){ return 0; }
+}
+function periodCutoff(periodKey, maxTs){
+  if(periodKey === "all") return -Infinity;
+  const p = PERIODS[periodKey];
+  if(!p || !p.dur || p.dur.unit !== "day") return -Infinity;
+  return maxTs - p.dur.count*24*36e5;
+}
+function detectionsInPeriod(nodes, periodKey){
+  if(!nodes.length) return [];
+  const maxTs = +new Date(nodes[nodes.length-1].timestamp);
+  const cut = periodCutoff(periodKey, maxTs);
+  return nodes.filter(d=> +new Date(d.timestamp) >= cut);
+}
+function buildSeriesFromDetections(nodes){
+  const dailyByDate = new Map();
+  const hoursBySpecies = new Map();
+  for(const d of (nodes||[])){
+    const date = d.timestamp && d.timestamp.length>=10 ? d.timestamp.slice(0,10) : new Date(d.timestamp).toISOString().slice(0,10);
+    const sid = String(d.speciesId);
+    const sname = d.species && d.species.commonName ? d.species.commonName : ("#"+sid);
+    const scol = d.species && d.species.color ? d.species.color : "#4cc9f0";
+
+    let day = dailyByDate.get(date);
+    if(!day){ day = { date, total:0, countsBy:new Map() }; dailyByDate.set(date, day); }
+    day.total += 1;
+    let c = day.countsBy.get(sid);
+    if(!c){ c = { speciesId:sid, count:0, species:{ commonName:sname, color:scol } }; day.countsBy.set(sid, c); }
+    c.count += 1;
+
+    let arr = hoursBySpecies.get(sid);
+    if(!arr){ arr = new Array(24).fill(0); hoursBySpecies.set(sid, arr); }
+    const m = /T(\d{2})/.exec(d.timestamp||"");
+    const h = m ? +m[1] : new Date(d.timestamp).getHours();
+    if(h>=0 && h<24) arr[h] += 1;
+  }
+
+  const daily = [...dailyByDate.values()]
+    .sort((a,b)=> a.date<b.date ? -1 : 1)
+    .map(d=>({ date:d.date, total:d.total, counts:[...d.countsBy.values()] }));
+  const hours = [...hoursBySpecies.entries()].map(([sid,arr])=>({
+    speciesId:sid,
+    bins: arr.map((count,key)=>({key,count})).filter(b=>b.count>0)
+  }));
+  return { daily, hours };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1660,7 +1761,7 @@ async function load(){
   $("liveLine").textContent = "loading…";
   const p = PERIODS[currentPeriod];
   try{
-    const [series, station, images, sample] = await Promise.all([
+    const [series, station, images, sampleLive] = await Promise.all([
       gql(Q_SERIES, { p: p.dur }),
       gql(Q_STATION, { id: STATION_ID }),
       imageCache ? Promise.resolve(imageCache) : fetchImages(),
@@ -1679,7 +1780,19 @@ async function load(){
       updateStoreInfo();
     }
 
-    const A = aggregate(series.daily||[], series.hours||[]);
+    // Persist detections so bird analytics survive API aging-out windows.
+    const dAdded = mergeDetections(sampleLive||[]);
+    if(dAdded) saveDetectionStore();
+
+    const persistedAll = storeDetections();
+    const persistedInRange = detectionsInPeriod(persistedAll, currentPeriod);
+    const derived = persistedInRange.length ? buildSeriesFromDetections(persistedInRange) : null;
+    const seriesSrc = derived || { daily: series.daily||[], hours: series.hours||[] };
+    const sample = persistedInRange.length
+      ? persistedInRange.slice().sort((a,b)=> a.timestamp>b.timestamp ? -1 : 1).slice(0,600)
+      : (sampleLive||[]);
+
+    const A = aggregate(seriesSrc.daily||[], seriesSrc.hours||[]);
     const samplesBySpecies = indexSpeciesSamples(sample);
     charts._lastA = A;
     speciesMeta = A.meta || {};
@@ -1800,8 +1913,10 @@ $("tabs").addEventListener("click",(e)=>{
 // then kick off the live load.
 loadStore();
 updateStoreInfo();
-autoLoadDefaultHistory().then((added)=>{
-  if(added){ saveStore(); updateStoreInfo(); }
+loadDetectionStore();
+Promise.all([autoLoadDefaultHistory(), autoLoadDefaultDetections()]).then(([addedS, addedD])=>{
+  if(addedS){ saveStore(); updateStoreInfo(); }
+  if(addedD){ saveDetectionStore(); }
   load();
 });
 
