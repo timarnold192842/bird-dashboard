@@ -226,19 +226,20 @@
   .tl-tick{position:absolute;bottom:24px;width:1px;height:12px;background:#2f3b4e}
   .tl-ticklbl{position:absolute;bottom:2px;transform:translateX(-50%);font-size:10px;color:var(--muted);white-space:nowrap;opacity:.95;max-width:95px;overflow:hidden;text-overflow:ellipsis}
   .tl-ticklbl.alt{bottom:14px;opacity:.8}
-  .tl-col{position:absolute;bottom:31px;transform:translateX(-50%);width:0;height:176px}
+  .tl-col{position:absolute;bottom:31px;transform:translateX(-50%);width:0;height:176px;z-index:2}
+  .tl-col:hover,.tl-col:focus-within{z-index:35}
   .tl-col .line{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:2px;background:rgba(179,136,235,.55);border-radius:2px}
-  .tl-col .dot{position:absolute;left:50%;transform:translateX(-50%);border-radius:999px;overflow:hidden;border:2px solid #1a2332;box-shadow:0 3px 10px rgba(0,0,0,.35);background:#253144}
+  .tl-col .dot{position:absolute;left:50%;transform:translateX(-50%);border-radius:999px;overflow:hidden;border:2px solid #1a2332;box-shadow:0 3px 10px rgba(0,0,0,.35);background:#253144;transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease}
+  .tl-col:hover .dot,.tl-col:focus-within .dot{transform:translateX(-50%) scale(1.18);box-shadow:0 8px 24px rgba(0,0,0,.55);border-color:#4ecdc4}
   .tl-col .dot img{width:100%;height:100%;object-fit:cover;display:block}
   .tl-col .dot .ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:12px;color:#d9e2ef;font-weight:700}
   .tl-col .cnt{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;font-size:10.5px;color:#c9d4e3;background:#1a2432;border:1px solid #2f3d52;padding:0 6px;border-radius:999px;line-height:17px;height:17px;pointer-events:none}
-  .tl-gap{position:absolute;top:18px;bottom:30px;width:38px;transform:translateX(-50%);background:linear-gradient(180deg,#101a2a 0,#1b2940 100%);opacity:.99;box-shadow:inset 0 0 0 1px #30425d, 0 0 0 1px rgba(0,0,0,.2);
-    clip-path:polygon(
-      0% 13px, 10% 0%, 20% 13px, 30% 0%, 40% 13px, 50% 0%, 60% 13px, 70% 0%, 80% 13px, 90% 0%, 100% 13px,
-      100% calc(100% - 13px), 90% 100%, 80% calc(100% - 13px), 70% 100%, 60% calc(100% - 13px),
-      50% 100%, 40% calc(100% - 13px), 30% 100%, 20% calc(100% - 13px), 10% 100%, 0% calc(100% - 13px)
-    );
-  }
+  .tl-gap{position:absolute;top:12px;bottom:30px;width:44px;transform:translateX(-50%);background:linear-gradient(180deg,#101a2a 0,#1b2940 100%);opacity:.99;box-shadow:inset 0 0 0 1px #30425d, 0 0 0 1px rgba(0,0,0,.2)}
+  .tl-gap::before,.tl-gap::after{content:"";position:absolute;left:0;right:0;height:16px;pointer-events:none;background:
+      linear-gradient(-45deg,transparent 49%,#1b2940 51%) 0 0/20px 16px repeat-x,
+      linear-gradient(45deg,transparent 49%,#1b2940 51%) 10px 0/20px 16px repeat-x}
+  .tl-gap::before{top:-16px}
+  .tl-gap::after{bottom:-16px;transform:scaleY(-1)}
   .tl-gaplbl{position:absolute;top:4px;left:50%;transform:translateX(-50%);font-size:10.5px;color:var(--muted);background:#151d2a;padding:1px 6px;border-radius:999px;border:1px solid #2d3a4d;white-space:nowrap}
   .tl-tip{position:fixed;z-index:10000;pointer-events:none;background:#0f1623;color:#d9e3f2;border:1px solid #2f3d52;border-radius:8px;padding:6px 8px;box-shadow:0 8px 24px rgba(0,0,0,.35);font-size:12px;line-height:1.25;max-width:280px;display:none;white-space:normal}
   .tlhelp{color:var(--muted);font-size:12px;margin-top:8px}
@@ -334,7 +335,7 @@
       <h2>Detection timeline</h2>
       <p class="hint" id="detTimelineHint">Horizontally scrollable timeline across the selected range. Marker avatars show the dominant species per time bin; empty stretches are clipped.</p>
       <div class="timelinebox" id="detTimeline"></div>
-      <p class="tlhelp">Tip: drag horizontally to explore the full range. Marker size and xN labels indicate detections in that bin.</p>
+      <p class="tlhelp">Tip: drag horizontally to explore the full range. Marker height and avatar size indicate detections; hover a marker for exact count.</p>
     </div>
 
     <div class="card span2">
@@ -1377,7 +1378,7 @@ function renderDetectionTimeline(detections, images){
   }
 
   const shiftByIndex = {};
-  const gapNudgePx = 44;
+  const gapNudgePx = 52;
   for(const gp of gaps){
     shiftByIndex[gp.i] = (shiftByIndex[gp.i] || 0) + gapNudgePx;
     if(gp.i+1 < rows.length) shiftByIndex[gp.i+1] = (shiftByIndex[gp.i+1] || 0) + Math.round(gapNudgePx*0.55);
@@ -1385,10 +1386,8 @@ function renderDetectionTimeline(detections, images){
     if(gp.i-2 >= 0) shiftByIndex[gp.i-2] = (shiftByIndex[gp.i-2] || 0) - Math.round(gapNudgePx*0.55);
   }
 
-  let lastBadgeX = -1e9;
-  const minBadgeDx = 34;
   const gapCenters = gaps.map(gp=>xAt(gp.eff));
-  const minGapCenterDx = 40;
+  const minGapCenterDx = 56;
   for(let i=0;i<rows.length;i++){
     const r = rows[i];
     let x = xAt(eff[i]) + (shiftByIndex[i] || 0);
@@ -1406,14 +1405,11 @@ function renderDetectionTimeline(detections, images){
     const sci = m.sci || "";
     const tip = r.top.name + (sci ? ' ('+sci+')' : '')+' · '+r.total+' detections · '+new Date(r.t).toLocaleString();
     const dotBottom = Math.max(8, mag - sz*0.45);
-    const showCnt = r.total>1 && (x-lastBadgeX)>=minBadgeDx;
-    if(showCnt) lastBadgeX = x;
     html += '<div class="tl-col" style="left:'+x+'px" data-tip="'+escAttr(tip)+'">'+
       '<span class="line" style="height:'+mag+'px"></span>'+
       (bw ? '<a class="dot" href="'+bw+'" target="_blank" rel="noopener" style="bottom:'+dotBottom+'px;width:'+sz+'px;height:'+sz+'px">' : '<span class="dot" style="bottom:'+dotBottom+'px;width:'+sz+'px;height:'+sz+'px">')+
       (img ? '<img src="'+img+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '<span class="ph">'+(r.top.name||"?").slice(0,1)+'</span>')+
       (bw ? '</a>' : '</span>')+
-      (showCnt ? '<span class="cnt">x'+r.total+'</span>' : '')+
     '</div>';
   }
   html += '</div>';
